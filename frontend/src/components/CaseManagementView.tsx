@@ -1,0 +1,140 @@
+'use client';
+
+import React, { useState } from 'react';
+import { 
+  FolderOpen, Plus, Calendar, User, CheckCircle, ShieldCheck, 
+  ArrowRight, FileSpreadsheet, AlertTriangle, Database
+} from 'lucide-react';
+import { useCase } from '../context/CaseContext';
+import CreateCaseModal from './CreateCaseModal';
+import { cn } from '../utils/cn';
+
+interface CaseManagementViewProps {
+  onSelectCaseTab?: (tabId: string) => void;
+}
+
+export default function CaseManagementView({ onSelectCaseTab }: CaseManagementViewProps) {
+  const { cases, activeCase, setActiveCaseId, isLoading, refreshCases } = useCase();
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+
+  return (
+    <div className="flex flex-col h-full bg-background p-6 md:p-8 max-w-7xl mx-auto w-full overflow-y-auto">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8 border-b border-border pb-4">
+        <div>
+          <h2 className="text-2xl font-bold text-foreground flex items-center gap-2">
+            <FolderOpen className="w-6 h-6 text-primary" />
+            Case Dossiers & Management
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Registered investigative operations, attached evidence files, and active workspaces
+          </p>
+        </div>
+        <button
+          onClick={() => setIsCreateOpen(true)}
+          className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-sm"
+        >
+          <Plus className="w-4 h-4" /> New Case Dossier
+        </button>
+      </div>
+
+      {isLoading && cases.length === 0 ? (
+        <div className="p-12 text-center text-muted-foreground">Loading active cases from backend...</div>
+      ) : cases.length === 0 ? (
+        <div className="p-12 border-2 border-dashed border-border rounded-xl text-center space-y-4 max-w-md mx-auto my-12">
+          <FolderOpen className="w-12 h-12 text-muted-foreground mx-auto" />
+          <h3 className="text-lg font-semibold text-foreground">No Investigation Cases Found</h3>
+          <p className="text-sm text-muted-foreground">
+            Create your first formal case dossier to begin uploading raw evidence files and discovering intelligence.
+          </p>
+          <button
+            onClick={() => setIsCreateOpen(true)}
+            className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" /> Create Case
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {cases.map((c) => {
+            const isActive = activeCase?.case_id === c.case_id;
+            return (
+              <div
+                key={c.case_id}
+                onClick={() => setActiveCaseId(c.case_id)}
+                className={cn(
+                  "bg-card border rounded-xl p-6 flex flex-col justify-between transition-all cursor-pointer shadow-sm relative group",
+                  isActive 
+                    ? "border-primary ring-1 ring-primary shadow-primary/10" 
+                    : "border-border hover:border-primary/50"
+                )}
+              >
+                <div>
+                  <div className="flex items-start justify-between gap-2 mb-3">
+                    <span className="text-xs font-mono font-bold text-primary bg-primary/10 px-2.5 py-1 rounded border border-primary/20">
+                      {c.case_reference}
+                    </span>
+                    <span className={cn(
+                      "text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border",
+                      c.status === 'ACTIVE' 
+                        ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" 
+                        : "bg-secondary text-muted-foreground border-border"
+                    )}>
+                      {c.status}
+                    </span>
+                  </div>
+
+                  <h3 className="text-lg font-bold text-foreground mb-2 group-hover:text-primary transition-colors">
+                    {c.title}
+                  </h3>
+
+                  <p className="text-sm text-muted-foreground line-clamp-3 mb-4">
+                    {c.description || 'No detailed investigative context provided for this operation.'}
+                  </p>
+                </div>
+
+                <div className="space-y-3 pt-4 border-t border-border text-xs text-muted-foreground">
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5" />
+                      {new Date(c.created_at).toLocaleDateString()}
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <User className="w-3.5 h-3.5" />
+                      {c.created_by}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2">
+                    <span className="text-xs font-medium text-foreground">
+                      {isActive ? (
+                        <span className="text-primary font-bold flex items-center gap-1">
+                          <CheckCircle className="w-3.5 h-3.5" /> Current Workspace
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">Click to Activate</span>
+                      )}
+                    </span>
+                    {onSelectCaseTab && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveCaseId(c.case_id);
+                          onSelectCaseTab('data-sources');
+                        }}
+                        className="text-xs font-bold text-primary hover:underline flex items-center gap-1"
+                      >
+                        Evidence <ArrowRight className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <CreateCaseModal isOpen={isCreateOpen} onClose={() => setIsCreateOpen(false)} />
+    </div>
+  );
+}

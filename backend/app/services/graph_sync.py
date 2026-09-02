@@ -1,13 +1,24 @@
-from app.core.db import db_client
+import logging
 from app.core.neo4j_client import neo4j_client
+from app.core.database import get_db_context
+from app.models.postgres_models import GoldenProfileModel
+from app.processing.canonical_reader import canonical_reader
 
+logger = logging.getLogger("investigation.graph_sync")
 
 async def sync_mongo_to_neo4j():
-    if not neo4j_client.is_connected:
+    """
+    Synchronizes canonical events and resolved golden profiles into Neo4j property graph.
+    Data source:
+      - Golden Profiles from PostgreSQL golden_profiles table
+      - Operational Telemetry & Transactions from MinIO Parquet Canonical Warehouse
+    Completely zero MongoDB dependency.
+    """
+    if not neo4j_client.ensure_connected():
         return {"status": "error", "message": "Neo4j not connected"}
 
     with neo4j_client.driver.session() as session:
-        # ── Create constraints (idempotent) ───────────────────────
+        # ── 1. Create Constraints (Idempotent) ───────────────────────
         for cypher in [
             "CREATE CONSTRAINT IF NOT EXISTS FOR (p:Person) REQUIRE p.golden_id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (ph:Phone) REQUIRE ph.number IS UNIQUE",
@@ -22,9 +33,25 @@ async def sync_mongo_to_neo4j():
             except Exception:
                 pass
 
-        # ── 1. Golden Person nodes (rich, denormalized) ───────────
-        profiles = await db_client.golden_col.find({}).to_list(None)
-        for p in profiles:
+        # ── 2. Sync Golden Person Nodes from PostgreSQL ──────────────
+        with get_db_context() as db:
+            profiles = db.query(GoldenProfileModel).all()
+            profile_dicts = [{
+                "z_cluster_id": p.z_cluster_id,
+                "primary_name": p.primary_name,
+                "risk_score": p.risk_score,
+                "known_aliases": p.known_aliases or [],
+                "known_phones": p.known_phones or [],
+                "associated_emails": p.associated_emails or [],
+                "known_addresses": p.known_addresses or [],
+                "national_ids": p.national_ids or [],
+                "known_accounts": p.known_accounts or [],
+                "social_handles": p.social_handles or [],
+                "method": p.method,
+                "last_updated": p.last_updated.isoformat() if p.last_updated else ""
+            } for p in profiles]
+
+        for p in profile_dicts:
             cluster_id = p["z_cluster_id"]
             session.run("""
                 MERGE (person:Person {golden_id: $cluster_id})
@@ -50,29 +77,28 @@ async def sync_mongo_to_neo4j():
                 "last_updated": p.get("last_updated", ""),
             })
 
-            # ── Phone nodes ───────────────────────────────────────
+            # Phone nodes and OWNS_PHONE relationships
             for phone in p.get("known_phones", []):
-                if phone and phone.lower() not in ("nan", "none", ""):
+                if phone and str(phone).lower() not in ("nan", "none", ""):
                     session.run("""
                         MERGE (ph:Phone {number: $phone})
                         MERGE (p:Person {golden_id: $cluster_id})
                         MERGE (p)-[:OWNS_PHONE]->(ph)
-                    """, {"cluster_id": cluster_id, "phone": phone})
+                    """, {"cluster_id": cluster_id, "phone": str(phone).strip()})
 
-            # ── Bank Account nodes ────────────────────────────────
+            # Bank Account nodes and OWNS_ACCOUNT relationships
             for acc in p.get("known_accounts", []):
-                if acc and acc.lower() not in ("nan", "none", ""):
+                if acc and str(acc).lower() not in ("nan", "none", ""):
                     session.run("""
                         MERGE (ba:BankAccount {account_number: $acc})
                         SET ba.holder = $name
                         MERGE (p:Person {golden_id: $cluster_id})
                         MERGE (p)-[:OWNS_ACCOUNT]->(ba)
-                    """, {"cluster_id": cluster_id, "acc": acc,
-                          "name": p.get("primary_name")})
+                    """, {"cluster_id": cluster_id, "acc": str(acc).strip(), "name": p.get("primary_name")})
 
-            # ── Social Account nodes ──────────────────────────────
+            # Social Account nodes and USES_HANDLE relationships
             for sh in p.get("social_handles", []):
-                handle   = sh.get("handle", "")
+                handle = sh.get("handle", "")
                 platform = sh.get("platform", "")
                 if handle:
                     session.run("""
@@ -80,27 +106,25 @@ async def sync_mongo_to_neo4j():
                         SET s.platform = $platform
                         MERGE (p:Person {golden_id: $cluster_id})
                         MERGE (p)-[:USES_HANDLE]->(s)
-                    """, {"cluster_id": cluster_id,
-                          "handle": handle, "platform": platform})
+                    """, {"cluster_id": cluster_id, "handle": str(handle).strip(), "platform": platform})
 
-        # ── 2. Telecom / Network telemetry (IMEI, Tower, IP) ─────
-        events = await db_client.events_col.find({}).to_list(None)
+        # ── 3. Sync Operational Telemetry & Transactions from MinIO Parquet Warehouse ──
+        events = canonical_reader.read_all_events()
+
+        def is_empty(val):
+            return not val or str(val).lower() in ("nan", "none", "")
 
         for ev in events:
             cluster_id = ev.get("z_cluster_id")
-
             telemetry = ev.get("telemetry", {})
-            financial  = ev.get("financial", {})
-            identity   = ev.get("normalized_identity", {})
-            timestamp  = ev.get("timestamp", "")
-            phone      = identity.get("phone")
+            financial = ev.get("financial", {})
+            identity = ev.get("normalized_identity", {})
+            timestamp = ev.get("timestamp", "")
+            phone = identity.get("phone")
 
-            def empty(val):
-                return not val or str(val).lower() in ("nan", "none", "")
-
-            # IMEI → Phone
+            # IMEI → Phone (USED_DEVICE)
             imei = telemetry.get("imei")
-            if not empty(imei) and not empty(phone):
+            if not is_empty(imei) and not is_empty(phone):
                 session.run("""
                     MERGE (ph:Phone {number: $phone})
                     MERGE (i:IMEI {imei_number: $imei})
@@ -108,9 +132,9 @@ async def sync_mongo_to_neo4j():
                     SET r.last_seen = $timestamp
                 """, {"phone": phone, "imei": str(imei), "timestamp": timestamp})
 
-            # CellTower → Phone
+            # CellTower → Phone (PINGED_TOWER)
             tower = telemetry.get("cell_tower_id")
-            if not empty(tower) and not empty(phone):
+            if not is_empty(tower) and not is_empty(phone):
                 session.run("""
                     MERGE (t:CellTower {tower_id: $tower})
                     SET t.lat     = $lat,
@@ -121,31 +145,31 @@ async def sync_mongo_to_neo4j():
                     SET r.last_seen = $timestamp,
                         r.duration  = $duration
                 """, {
-                    "tower"  : str(tower),
-                    "lat"    : telemetry.get("lat"),
-                    "lng"    : telemetry.get("lng"),
+                    "tower": str(tower),
+                    "lat": telemetry.get("lat"),
+                    "lng": telemetry.get("lng"),
                     "address": telemetry.get("address", ""),
-                    "phone"  : phone,
+                    "phone": phone,
                     "timestamp": timestamp,
                     "duration": telemetry.get("duration_seconds", "")
                 })
 
             # Logical IP Routing based on Domain
             ip = telemetry.get("assigned_ip")
-            domain = ev.get("domain")
-            
-            if not empty(ip):
+            domain = ev.get("domain") or ev.get("source_type")
+
+            if not is_empty(ip):
                 session.run("MERGE (i:IPAddress {address: $ip})", {"ip": str(ip)})
-                
-                if domain == "NETWORK" and not empty(phone):
+
+                if domain == "NETWORK" and not is_empty(phone):
                     session.run("""
                         MERGE (i:IPAddress {address: $ip})
                         MERGE (ph:Phone {number: $phone})
                         MERGE (ph)-[r:ASSIGNED_IP]->(i)
                         SET r.last_seen = $timestamp
                     """, {"ip": str(ip), "phone": phone, "timestamp": timestamp})
-                    
-                elif domain == "SOCIAL" and not empty(identity.get("social_handle")):
+
+                elif domain == "SOCIAL" and not is_empty(identity.get("social_handle")):
                     handle = identity.get("social_handle")
                     platform = identity.get("social_platform", "")
                     session.run("""
@@ -155,9 +179,8 @@ async def sync_mongo_to_neo4j():
                         MERGE (s)-[r:LOGGED_IN_FROM]->(i)
                         SET r.last_seen = $timestamp
                     """, {"ip": str(ip), "handle": str(handle), "platform": platform, "timestamp": timestamp})
-                    
+
                 elif cluster_id:
-                    # Fallback to person if domain is generic and person is known
                     session.run("""
                         MERGE (i:IPAddress {address: $ip})
                         MERGE (p:Person {golden_id: $cluster_id})
@@ -165,10 +188,10 @@ async def sync_mongo_to_neo4j():
                         SET r.last_seen = $timestamp
                     """, {"cluster_id": cluster_id, "ip": str(ip), "timestamp": timestamp})
 
-            # Bank transaction counterparty link
-            acc    = financial.get("account_number")
+            # Financial Transactions between Bank Accounts (TRANSACTED_WITH)
+            acc = financial.get("account_number")
             cp_acc = financial.get("counterparty")
-            if not empty(acc) and not empty(cp_acc):
+            if not is_empty(acc) and not is_empty(cp_acc):
                 session.run("""
                     MERGE (ba:BankAccount {account_number: $acc})
                     MERGE (cp:BankAccount {account_number: $cp})
@@ -178,22 +201,26 @@ async def sync_mongo_to_neo4j():
                         r.timestamp = $timestamp,
                         r.channel = $channel
                 """, {
-                    "acc": str(acc), 
+                    "acc": str(acc),
                     "cp": str(cp_acc),
-                    "amount": financial.get("amount", ""),
-                    "txn_type": financial.get("txn_type", ""),
+                    "amount": financial.get("amount_inr", 0.0),
+                    "txn_type": financial.get("txn_type", "TRANSFER"),
                     "timestamp": timestamp,
-                    "channel": financial.get("channel", "")
+                    "channel": financial.get("channel", "TRANSFER")
                 })
 
-        
-        # Trigger anomaly engine automatically after sync!
+        logger.info(f"[GraphSync] Synced {len(profile_dicts)} Golden Persons and {len(events)} events to Neo4j.")
+
+        # Trigger Anomaly Detection automatically after sync
         from app.services.anomaly_engine import run_anomaly_detection
         try:
-            # We use delay to let it run in the background (Celery)
             run_anomaly_detection.delay()
-            print("Auto-triggered anomaly engine job.")
+            logger.info("Auto-triggered anomaly engine job via Celery.")
         except Exception as e:
-            print("Failed to auto-trigger anomaly engine:", e)
+            logger.warning(f"Celery queueing unavailable ({e}), running anomaly engine directly...")
+            try:
+                run_anomaly_detection()
+            except Exception as ex:
+                logger.error(f"Failed to run anomaly engine directly: {ex}")
 
     return {"status": "success", "message": "Graph sync and anomaly detection triggered successfully"}

@@ -81,7 +81,7 @@ export default function GeospatialMap() {
   return (
     <div className="relative w-full h-full bg-[#020617] border border-cyanNeon/30 rounded overflow-hidden">
       <DeckGL
-        initialViewState={INITIAL_VIEW_STATE}
+        initialViewState={INITIAL_VIEW_STATE as any}
         controller={true}
         layers={layers}
       >

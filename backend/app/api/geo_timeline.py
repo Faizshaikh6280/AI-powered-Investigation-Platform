@@ -1,7 +1,7 @@
 from fastapi import APIRouter
-from app.core.db import db_client
 from typing import List, Dict, Any
 from datetime import datetime
+from app.processing.canonical_reader import canonical_reader
 
 router = APIRouter()
 
@@ -9,13 +9,18 @@ def iso_to_ms(iso_str: str) -> int:
     try:
         dt = datetime.fromisoformat(iso_str.replace('Z', '+00:00'))
         return int(dt.timestamp() * 1000)
-    except:
+    except Exception:
         return 0
 
 @router.get("/sync-data")
-async def get_sync_data():
-    events = await db_client.events_col.find({"timestamp": {"$ne": None}}).to_list(None)
-    
+async def get_sync_data(case_id: str = None):
+    """
+    Retrieves chronological timeline events and Deck.gl TripsLayer geospatial waypoints.
+    Reads from the MinIO Parquet canonical warehouse.
+    Zero MongoDB dependency.
+    """
+    events = canonical_reader.read_all_events(case_id=case_id)
+
     timeline_data = []
     waypoint_data = {}
 
@@ -23,15 +28,15 @@ async def get_sync_data():
         ts_str = ev.get("timestamp")
         if not ts_str:
             continue
-            
+
         ts_ms = iso_to_ms(ts_str)
         if ts_ms == 0:
             continue
-            
-        # Add to timeline
+
+        # Add to chronological timeline
         timeline_data.append({
-            "id": str(ev["_id"]),
-            "domain": ev.get("domain", "UNKNOWN"),
+            "id": str(ev.get("event_id")),
+            "domain": ev.get("domain") or ev.get("source_type", "UNKNOWN"),
             "event_type": ev.get("event_type", ""),
             "timestamp": ts_str,
             "time_ms": ts_ms,
@@ -39,12 +44,13 @@ async def get_sync_data():
             "financial": ev.get("financial", {}),
             "telemetry": ev.get("telemetry", {})
         })
-        
-        # Add to waypoints if geospatial
+
+        # Group into waypoints if geospatial coordinates exist
         cluster_id = ev.get("z_cluster_id")
-        lat = ev.get("telemetry", {}).get("lat")
-        lng = ev.get("telemetry", {}).get("lng")
-        
+        telemetry = ev.get("telemetry", {})
+        lat = telemetry.get("lat")
+        lng = telemetry.get("lng")
+
         if cluster_id and lat is not None and lng is not None:
             if cluster_id not in waypoint_data:
                 waypoint_data[cluster_id] = {
@@ -61,7 +67,6 @@ async def get_sync_data():
     # Sort waypoints by time internally
     formatted_waypoints = []
     for cid, data in waypoint_data.items():
-        # Sort parallel lists
         sorted_pairs = sorted(zip(data["timestamps"], data["path"]))
         data["timestamps"] = [p[0] for p in sorted_pairs]
         data["path"] = [p[1] for p in sorted_pairs]

@@ -1,147 +1,343 @@
+'use client';
+
 import React, { useState, useEffect } from 'react';
 import { 
   Users, Share2, AlertTriangle, FileText, Smartphone, Globe, 
-  ChevronRight, ArrowRight, MoreHorizontal, Filter, Calendar
+  ChevronRight, ArrowRight, ShieldAlert, Database, RefreshCw,
+  Clock, CheckCircle2, ShieldCheck, Sparkles, Network, CreditCard
 } from 'lucide-react';
+import { useCase } from '../context/CaseContext';
+import { apiClient, AnomalyStats, GoldenProfile, TimelineEventItem } from '../services/apiClient';
 import { cn } from '../utils/cn';
 
-const KPI = ({ title, value, icon: Icon, trend }: any) => (
-  <div className="bg-card border border-border p-5 rounded-xl flex flex-col hover:border-primary/50 transition-colors cursor-pointer group shadow-sm">
-    <div className="flex justify-between items-start mb-4">
-      <div className="p-2 rounded-md bg-secondary text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary transition-colors">
-        <Icon className="w-5 h-5" />
-      </div>
-      {trend && (
-        <span className="text-xs font-medium text-destructive bg-destructive/10 px-2 py-0.5 rounded-full border border-destructive/20">
-          {trend}
-        </span>
-      )}
-    </div>
-    <h4 className="text-3xl font-semibold text-foreground mb-1">{value}</h4>
-    <p className="text-sm font-medium text-muted-foreground">{title}</p>
-  </div>
-);
+interface OverviewDashboardProps {
+  onNavigateTab?: (tabId: string) => void;
+}
 
-export default function OverviewDashboard() {
-  const [stats, setStats] = useState({ entities: 0, relationships: 0, anomalies: 0, transactions: 0 });
+export default function OverviewDashboard({ onNavigateTab }: OverviewDashboardProps) {
+  const { activeCase, activeCaseDetail, refreshCases } = useCase();
+  const [stats, setStats] = useState({
+    entities: 0,
+    relationships: 0,
+    anomalies: 0,
+    evidenceFiles: 0,
+  });
+  const [anomalyStats, setAnomalyStats] = useState<AnomalyStats>({ total: 0, critical: 0, high: 0, medium: 0, low: 0 });
+  const [recentEvents, setRecentEvents] = useState<TimelineEventItem[]>([]);
+  const [topProfiles, setTopProfiles] = useState<GoldenProfile[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const loadData = async () => {
+    setIsLoading(true);
+    try {
+      const [profiles, graph, aStats, geoData] = await Promise.all([
+        apiClient.getGoldenProfiles().catch(() => []),
+        apiClient.getGraphTopology().catch(() => ({ nodes: [], edges: [] })),
+        apiClient.getAnomalyStats().catch(() => ({ total: 0, critical: 0, high: 0, medium: 0, low: 0 })),
+        apiClient.getGeoSyncData().catch(() => ({ timeline: [], waypoints: [] }))
+      ]);
+
+      setStats({
+        entities: profiles.length || graph.nodes?.length || 0,
+        relationships: graph.edges?.length || 0,
+        anomalies: aStats.total || 0,
+        evidenceFiles: activeCaseDetail?.evidence_count || activeCaseDetail?.evidence?.length || 0,
+      });
+      setAnomalyStats(aStats);
+      setTopProfiles(profiles.slice(0, 5));
+      setRecentEvents(geoData.timeline?.slice(0, 6) || []);
+    } catch (err) {
+      console.error('Failed to load overview data:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    Promise.all([
-      fetch('http://localhost:8000/api/system/golden_profiles').then(r => r.json()).catch(() => []),
-      fetch('http://localhost:8000/api/graph/topology').then(r => r.json()).catch(() => ({nodes: [], edges: []}))
-    ]).then(([profiles, graph]) => {
-      setStats({
-        entities: profiles.length || graph.nodes?.length || 1248,
-        relationships: graph.edges?.length || 8432,
-        anomalies: 37,
-        transactions: 24892
-      });
-    });
-  }, []);
+    loadData();
+  }, [activeCase?.case_id, activeCaseDetail]);
+
+  const getDomainIcon = (domain: string) => {
+    switch (domain?.toUpperCase()) {
+      case 'TELECOM': return Smartphone;
+      case 'BANKING': return CreditCard;
+      case 'NETWORK': return Globe;
+      default: return FileText;
+    }
+  };
+
+  const getDomainColor = (domain: string) => {
+    switch (domain?.toUpperCase()) {
+      case 'TELECOM': return 'text-indigo-500 bg-indigo-500/10 border-indigo-500/20';
+      case 'BANKING': return 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20';
+      case 'NETWORK': return 'text-blue-500 bg-blue-500/10 border-blue-500/20';
+      default: return 'text-amber-500 bg-amber-500/10 border-amber-500/20';
+    }
+  };
 
   return (
-    <div className="p-6 md:p-8 flex flex-col gap-8 h-full max-w-7xl mx-auto">
-      
+    <div className="p-6 md:p-8 flex flex-col gap-8 h-full max-w-7xl mx-auto w-full overflow-y-auto">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
         <div>
-          <h2 className="text-2xl font-semibold text-foreground">Investigation Overview</h2>
-          <p className="text-sm text-muted-foreground mt-1">Cross-domain activity and intelligence summary</p>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xs font-mono font-bold text-primary bg-primary/10 px-2 py-0.5 rounded border border-primary/20">
+              {activeCase?.case_reference || 'ACTIVE CASE'}
+            </span>
+            <span className="text-xs text-muted-foreground">• {activeCase?.title || 'Investigation Workspace'}</span>
+          </div>
+          <h2 className="text-2xl font-bold text-foreground">Operational Intelligence Overview</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Cross-domain activity, resolved identity clusters, and anomaly discoveries derived directly from backend warehouse.
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <button className="px-3 py-1.5 rounded-md bg-secondary border border-border text-sm font-medium hover:bg-secondary/80 transition-colors flex items-center gap-2 text-foreground">
-            <Calendar className="w-4 h-4 text-muted-foreground" /> Date Range
-          </button>
-          <button className="px-3 py-1.5 rounded-md bg-secondary border border-border text-sm font-medium hover:bg-secondary/80 transition-colors flex items-center gap-2 text-foreground">
-            <Filter className="w-4 h-4 text-muted-foreground" /> Filter
-          </button>
-          <button className="p-1.5 rounded-md bg-secondary border border-border hover:bg-secondary/80 transition-colors text-foreground">
-            <MoreHorizontal className="w-5 h-5 text-muted-foreground" />
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={loadData}
+            disabled={isLoading}
+            className="p-2 text-muted-foreground hover:text-foreground bg-secondary border border-border rounded-lg hover:bg-secondary/80 transition-colors"
+            title="Refresh Overview"
+          >
+            <RefreshCw className={cn("w-4 h-4", isLoading && "animate-spin")} />
           </button>
         </div>
       </div>
 
-      {/* KPIs */}
+      {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <KPI title="Entities Resolved" value={stats.entities} icon={Users} />
-        <KPI title="Graph Relationships" value={stats.relationships} icon={Share2} />
-        <KPI title="Anomalies Detected" value={stats.anomalies} icon={AlertTriangle} trend="12 High" />
-        <KPI title="Transactions Analyzed" value={stats.transactions} icon={FileText} />
+        <div 
+          onClick={() => onNavigateTab && onNavigateTab('entity-explorer')}
+          className="bg-card border border-border p-5 rounded-xl flex flex-col justify-between hover:border-primary/50 transition-all cursor-pointer shadow-sm group"
+        >
+          <div className="flex justify-between items-start mb-3">
+            <div className="p-2.5 rounded-lg bg-primary/10 text-primary border border-primary/20 group-hover:scale-110 transition-transform">
+              <Users className="w-5 h-5" />
+            </div>
+            <span className="text-xs font-bold text-muted-foreground group-hover:text-primary transition-colors flex items-center">
+              Explore <ChevronRight className="w-3 h-3" />
+            </span>
+          </div>
+          <div>
+            <h4 className="text-3xl font-black text-foreground">{stats.entities}</h4>
+            <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider mt-1">Resolved Entities</p>
+          </div>
+        </div>
+
+        <div 
+          onClick={() => onNavigateTab && onNavigateTab('relationship-graph')}
+          className="bg-card border border-border p-5 rounded-xl flex flex-col justify-between hover:border-primary/50 transition-all cursor-pointer shadow-sm group"
+        >
+          <div className="flex justify-between items-start mb-3">
+            <div className="p-2.5 rounded-lg bg-blue-500/10 text-blue-500 border border-blue-500/20 group-hover:scale-110 transition-transform">
+              <Share2 className="w-5 h-5" />
+            </div>
+            <span className="text-xs font-bold text-muted-foreground group-hover:text-primary transition-colors flex items-center">
+              Graph <ChevronRight className="w-3 h-3" />
+            </span>
+          </div>
+          <div>
+            <h4 className="text-3xl font-black text-foreground">{stats.relationships}</h4>
+            <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider mt-1">Graph Relationships</p>
+          </div>
+        </div>
+
+        <div 
+          onClick={() => onNavigateTab && onNavigateTab('anomalies')}
+          className="bg-card border border-border p-5 rounded-xl flex flex-col justify-between hover:border-destructive/50 transition-all cursor-pointer shadow-sm group"
+        >
+          <div className="flex justify-between items-start mb-3">
+            <div className="p-2.5 rounded-lg bg-destructive/10 text-destructive border border-destructive/20 group-hover:scale-110 transition-transform">
+              <ShieldAlert className="w-5 h-5" />
+            </div>
+            {anomalyStats.critical > 0 && (
+              <span className="text-[10px] font-black text-destructive bg-destructive/10 px-2 py-0.5 rounded-full border border-destructive/20 animate-pulse">
+                {anomalyStats.critical} Critical
+              </span>
+            )}
+          </div>
+          <div>
+            <h4 className="text-3xl font-black text-destructive">{stats.anomalies}</h4>
+            <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider mt-1">Anomalies Detected</p>
+          </div>
+        </div>
+
+        <div 
+          onClick={() => onNavigateTab && onNavigateTab('data-sources')}
+          className="bg-card border border-border p-5 rounded-xl flex flex-col justify-between hover:border-primary/50 transition-all cursor-pointer shadow-sm group"
+        >
+          <div className="flex justify-between items-start mb-3">
+            <div className="p-2.5 rounded-lg bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 group-hover:scale-110 transition-transform">
+              <Database className="w-5 h-5" />
+            </div>
+            <span className="text-xs font-bold text-muted-foreground group-hover:text-primary transition-colors flex items-center">
+              Evidence <ChevronRight className="w-3 h-3" />
+            </span>
+          </div>
+          <div>
+            <h4 className="text-3xl font-black text-foreground">{stats.evidenceFiles}</h4>
+            <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider mt-1">Evidence Files</p>
+          </div>
+        </div>
       </div>
 
-      {/* Main Two-Column Content */}
+      {/* Main 2-Column Content */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1 min-h-[400px]">
-        
-        {/* Main Area: Cross-Domain Activity */}
+        {/* Left Column: Recent Cross-Domain Activity */}
         <div className="lg:col-span-2 bg-card border border-border rounded-xl p-6 flex flex-col shadow-sm">
           <div className="flex justify-between items-center mb-6 border-b border-border pb-4">
-            <h3 className="text-lg font-medium text-foreground">Cross-Domain Activity</h3>
-            <button className="text-sm font-medium text-primary hover:text-primary/80 transition-colors">View Timeline</button>
-          </div>
-          
-          <div className="flex-1 space-y-4">
-            {[
-              { time: '08:32', type: 'PHONE CALL', desc: '+91 XXXXX to +91 XXXXX', icon: Smartphone, color: 'text-indigo-500', bg: 'bg-indigo-500/10' },
-              { time: '08:47', type: 'BANK TRANSFER', desc: '₹85,000 from XXXX4821', icon: FileText, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
-              { time: '09:03', type: 'IP LOGIN', desc: '103.X.X.X (Delhi)', icon: Globe, color: 'text-blue-500', bg: 'bg-blue-500/10' },
-              { time: '09:12', type: 'SOCIAL MEDIA POST', desc: '@username interaction', icon: Users, color: 'text-amber-500', bg: 'bg-amber-500/10' }
-            ].map((event, i) => (
-              <div key={i} className="flex items-start gap-4 p-3 rounded-lg hover:bg-secondary transition-colors cursor-pointer group">
-                <span className="text-xs font-mono text-muted-foreground pt-1.5 w-12">{event.time}</span>
-                <div className={cn("p-2 rounded-md", event.bg, event.color)}>
-                  <event.icon className="w-4 h-4" />
-                </div>
-                <div className="flex-1">
-                  <div className="text-xs font-semibold text-foreground uppercase tracking-wide">{event.type}</div>
-                  <div className="text-sm text-muted-foreground mt-0.5">{event.desc}</div>
-                </div>
-                <ChevronRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity self-center" />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Secondary Area: Risk Summary */}
-        <div className="bg-card border border-border rounded-xl p-6 flex flex-col shadow-sm">
-          <h3 className="text-lg font-medium text-foreground mb-6 border-b border-border pb-4">Investigation Risk</h3>
-          
-          <div className="flex items-center gap-6 mb-8">
-            <div className="relative w-24 h-24 flex items-center justify-center">
-              <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
-                <circle cx="50" cy="50" r="40" className="stroke-secondary" strokeWidth="10" fill="none" />
-                <circle cx="50" cy="50" r="40" className="stroke-destructive" strokeWidth="10" fill="none" strokeDasharray="251.2" strokeDashoffset="45.2" strokeLinecap="round" />
-              </svg>
-              <div className="absolute flex flex-col items-center">
-                <span className="text-2xl font-bold text-foreground">82</span>
-              </div>
-            </div>
             <div>
-              <div className="text-sm font-bold text-destructive uppercase tracking-widest mb-1">High Risk</div>
-              <p className="text-xs text-muted-foreground">Based on cross-domain anomalies</p>
+              <h3 className="text-base font-bold text-foreground">Recent Canonical Events</h3>
+              <p className="text-xs text-muted-foreground">Chronological cross-domain telemetry and financial events</p>
+            </div>
+            {onNavigateTab && (
+              <button 
+                onClick={() => onNavigateTab('timeline')}
+                className="text-xs font-bold text-primary hover:underline flex items-center gap-1"
+              >
+                Full Timeline <ArrowRight className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex-1 space-y-3">
+            {recentEvents.length === 0 ? (
+              <div className="p-8 text-center text-muted-foreground text-xs italic">
+                No canonical events recorded yet. Ingest evidence files to populate timeline.
+              </div>
+            ) : (
+              recentEvents.map((ev) => {
+                const Icon = getDomainIcon(ev.domain);
+                const colorClass = getDomainColor(ev.domain);
+                const dateObj = new Date(ev.time_ms);
+                const identityStr = ev.identity?.phone || ev.financial?.account_number || ev.identity?.name || ev.telemetry?.client_ip || 'Event Record';
+
+                return (
+                  <div
+                    key={ev.id}
+                    onClick={() => onNavigateTab && onNavigateTab('timeline')}
+                    className="flex items-center gap-4 p-3 rounded-lg hover:bg-secondary/50 transition-colors cursor-pointer group"
+                  >
+                    <span className="text-xs font-mono text-muted-foreground w-14 flex-shrink-0">
+                      {dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+
+                    <div className={cn("p-2 rounded-lg border flex-shrink-0", colorClass)}>
+                      <Icon className="w-4 h-4" />
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-bold text-foreground truncate">
+                        {identityStr}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground truncate">
+                        {ev.domain} • {ev.event_type?.replace(/_/g, ' ')}
+                        {ev.financial?.amount_inr ? ` • ₹${ev.financial.amount_inr.toLocaleString()}` : ''}
+                        {ev.telemetry?.tower_address ? ` • ${ev.telemetry.tower_address}` : ''}
+                      </div>
+                    </div>
+
+                    <ChevronRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* Right Column: Threat Distribution & Top Entities */}
+        <div className="space-y-6">
+          {/* Anomaly Distribution Card */}
+          <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+            <div className="flex justify-between items-center mb-4 border-b border-border pb-3">
+              <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+                <ShieldAlert className="w-4 h-4 text-destructive" /> Threat Distribution
+              </h3>
+              {onNavigateTab && (
+                <button 
+                  onClick={() => onNavigateTab('anomalies')}
+                  className="text-xs font-bold text-primary hover:underline"
+                >
+                  View Radar
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="font-semibold text-destructive flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-destructive" /> Critical Priority
+                </span>
+                <span className="font-bold text-foreground">{anomalyStats.critical}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="font-semibold text-orange-500 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-orange-500" /> High Severity
+                </span>
+                <span className="font-bold text-foreground">{anomalyStats.high}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="font-semibold text-amber-500 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-amber-500" /> Medium Severity
+                </span>
+                <span className="font-bold text-foreground">{anomalyStats.medium}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="font-semibold text-blue-500 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-blue-500" /> Low / Baseline
+                </span>
+                <span className="font-bold text-foreground">{anomalyStats.low}</span>
+              </div>
             </div>
           </div>
 
-          <div className="flex-1">
-            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Primary Risk Drivers</h4>
+          {/* Top Resolved Entities Card */}
+          <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+            <div className="flex justify-between items-center mb-4 border-b border-border pb-3">
+              <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+                <Users className="w-4 h-4 text-primary" /> Key Resolved Targets
+              </h3>
+              {onNavigateTab && (
+                <button 
+                  onClick={() => onNavigateTab('entity-explorer')}
+                  className="text-xs font-bold text-primary hover:underline"
+                >
+                  All Entities
+                </button>
+              )}
+            </div>
+
             <div className="space-y-3">
-              {[
-                { label: 'Rapid fund movement', risk: 'bg-red-500' },
-                { label: 'Unusual communication', risk: 'bg-orange-500' },
-                { label: 'Multiple device identities', risk: 'bg-amber-500' }
-              ].map((driver, i) => (
-                <div key={i} className="flex items-center gap-3">
-                  <div className={cn("w-1.5 h-1.5 rounded-full", driver.risk)} />
-                  <span className="text-sm text-foreground">{driver.label}</span>
+              {topProfiles.length === 0 ? (
+                <div className="text-xs text-muted-foreground italic text-center py-4">
+                  No golden identity profiles resolved yet.
                 </div>
-              ))}
+              ) : (
+                topProfiles.map((p) => {
+                  const risk = Math.round((p.risk_score || 0) * 100);
+                  return (
+                    <div
+                      key={p.z_cluster_id}
+                      onClick={() => onNavigateTab && onNavigateTab('entity-explorer')}
+                      className="p-2.5 rounded-lg hover:bg-secondary/50 transition-colors cursor-pointer flex items-center justify-between text-xs"
+                    >
+                      <div className="truncate pr-2">
+                        <div className="font-bold text-foreground truncate">{p.primary_name || p.z_cluster_id}</div>
+                        <div className="text-[10px] text-muted-foreground font-mono truncate">{p.z_cluster_id}</div>
+                      </div>
+                      <span className={cn(
+                        "text-[10px] font-bold px-2 py-0.5 rounded border flex-shrink-0",
+                        risk >= 60 ? "bg-destructive/10 text-destructive border-destructive/20" : "bg-secondary text-foreground border-border"
+                      )}>
+                        {risk}% Risk
+                      </span>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
-          
-          <button className="w-full mt-6 py-2 bg-secondary text-foreground text-sm font-medium rounded-md hover:bg-secondary/80 transition-colors">
-            View All Alerts
-          </button>
         </div>
-        
       </div>
     </div>
   );

@@ -98,7 +98,7 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
 
   const fetchData = () => {
     setLoading(true);
-    fetch('http://localhost:8000/api/graph/topology')
+    fetch('/api/graph/topology')
       .then(r => r.json())
       .then(data => {
         setGraphData(data);
@@ -349,26 +349,39 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
 
   useEffect(() => {
     if (focusEntityId && cyRef.current) {
-      const node = cyRef.current.getElementById(focusEntityId);
-      if (node.length > 0) {
+      let node = cyRef.current.getElementById(focusEntityId);
+      if (!node || node.length === 0) {
+        node = cyRef.current.nodes().filter((n: any) => {
+          const d = n.data();
+          const props = d.properties || {};
+          return d.label === focusEntityId ||
+                 d.id === focusEntityId ||
+                 props.golden_id === focusEntityId ||
+                 props.number === focusEntityId ||
+                 props.account_number === focusEntityId ||
+                 props.handle === focusEntityId;
+        });
+      }
+      if (node && node.length > 0) {
         cyRef.current.elements().removeClass('highlighted dimmed');
-        const connectedEdges = node.connectedEdges();
+        const targetNode = node[0];
+        const connectedEdges = targetNode.connectedEdges();
         const connectedNodes = connectedEdges.connectedNodes();
         
-        cyRef.current.elements().not(node).not(connectedNodes).not(connectedEdges).addClass('dimmed');
-        node.addClass('highlighted');
+        cyRef.current.elements().not(targetNode).not(connectedNodes).not(connectedEdges).addClass('dimmed');
+        targetNode.addClass('highlighted');
         connectedEdges.addClass('highlighted');
         connectedNodes.addClass('highlighted');
         
         cyRef.current.animate({
           zoom: 1.5,
-          center: { eles: node },
+          center: { eles: targetNode },
           duration: 1000,
           easing: 'ease-in-out'
         });
 
-        // Set selected node to open drawer optionally
-        setSelectedNode(node.data());
+        // Set selected node to open drawer
+        setSelectedNode(targetNode.data());
         setActiveDrawer('node');
       }
     }

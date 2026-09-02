@@ -1,31 +1,35 @@
 """
-Real Entity Resolution using Zingg Docker Worker + deterministic fallback.
-Reads raw_entities_profiles.csv, normalizes phone numbers, then groups by:
-  1. Exact national_id match  
-  2. Exact normalized phone match
-  3. Fuzzy name + address (same area code)
+Entity Resolution Engine using Zingg Docker Worker + deterministic Union-Find fallback.
+Reads canonical events and raw KYC/social profiles, normalizes phone numbers, then groups by:
+  1. Exact national_id match (Aadhar/Govt ID)
+  2. Exact E.164 normalized phone match
+  3. Survivorship rule: longest/most complete name becomes primary_name, others become known_aliases
+  4. Cross-links bank accounts and social handles by matching registered phone numbers
 
-Also reads social_media_logs.csv to link social handles to entity clusters.
+Stores resolved golden identities in PostgreSQL golden_profiles table.
+Backfills z_cluster_id into MinIO Parquet canonical warehouse.
+Completely zero MongoDB dependencies.
 """
 
-import pandas as pd
-import re
 import os
+import re
 import json
 import requests
-import hashlib
-from datetime import datetime
+import datetime
+import pandas as pd
 from typing import Dict, List, Optional, Tuple
-from app.core.db import db_client
+
+from app.core.config import settings
+from app.core.database import get_db_context
+from app.models.postgres_models import GoldenProfileModel
+from app.processing.canonical_reader import canonical_reader
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data_files")
-
 
 def normalize_phone(phone) -> Optional[str]:
     if pd.isna(phone) or not str(phone).strip():
         return None
     s = re.sub(r"[\s\-\(\)]", "", str(phone))
-    # Remove leading 0 and add +91
     if s.startswith("+91"):
         return s
     if s.startswith("91") and len(s) == 12:
@@ -34,14 +38,7 @@ def normalize_phone(phone) -> Optional[str]:
         return "+91" + s[1:]
     if len(s) == 10 and s.isdigit():
         return "+91" + s
-    return s
-
-
-def normalize_name(name) -> str:
-    if pd.isna(name):
-        return ""
-    return str(name).strip().lower()
-
+    return s if s.startswith("+") else f"+{s}"
 
 def build_clusters_deterministic(df: pd.DataFrame) -> Dict[str, str]:
     """
@@ -51,7 +48,6 @@ def build_clusters_deterministic(df: pd.DataFrame) -> Dict[str, str]:
       2. Same normalized phone → same cluster
       3. If neither, isolated cluster
     """
-    # Union-Find
     parent = {rid: rid for rid in df["record_id"]}
 
     def find(x):
@@ -100,34 +96,34 @@ def build_clusters_deterministic(df: pd.DataFrame) -> Dict[str, str]:
 
     return result
 
-
 def try_zingg_docker(csv_path: str) -> Optional[Dict]:
-    """Try to use real Zingg Docker worker, return None if unavailable."""
+    """Try to execute real Zingg Docker worker, return None if unavailable."""
     try:
+        url = f"{settings.ZINGG_URL.rstrip('/')}/execute"
         resp = requests.post(
-            "http://localhost:8001/execute",
+            url,
             json={"data_path": csv_path, "output_dir": "/app/zingg_output_models"},
-            timeout=120
+            timeout=30
         )
         if resp.status_code == 200:
             return resp.json()
     except Exception as e:
-        print(f"[Zingg] Docker worker unavailable: {e}")
+        print(f"[Zingg] Docker worker unavailable at {settings.ZINGG_URL}: {e}")
     return None
-
 
 async def run_entity_resolution() -> Dict:
     """
     Full pipeline:
-    1. Load raw_entities_profiles.csv
-    2. Attempt Zingg Docker (real ML)
-    3. Fall back to deterministic union-find if Docker unavailable  
-    4. Write golden_profiles to MongoDB
-    5. Backfill z_cluster_id on normalized_events
-    Returns summary stats
+    1. Load raw_entities_profiles.csv (and/or canonical events)
+    2. Attempt Zingg Docker worker
+    3. Fall back to deterministic Union-Find if worker is unavailable
+    4. Synthesize Golden Profiles with survivorship & heuristic risk scoring
+    5. Write golden_profiles to PostgreSQL
+    6. Backfill z_cluster_id on MinIO Parquet canonical warehouse
     """
     csv_path = os.path.join(DATA_DIR, "raw_entities_profiles.csv")
     social_path = os.path.join(DATA_DIR, "social_media_logs.csv")
+    bank_path = os.path.join(DATA_DIR, "bank_statements.csv")
 
     df = pd.read_csv(csv_path)
     df["phone_normalized"] = df["phone"].apply(normalize_phone)
@@ -137,20 +133,10 @@ async def run_entity_resolution() -> Dict:
     zingg_method = "zingg_docker" if zingg_result else "deterministic_union_find"
 
     # --- Step 2: Build clusters ---
-    cluster_map = build_clusters_deterministic(df)  # record_id -> cluster_id
+    cluster_map = build_clusters_deterministic(df)
     df["z_cluster_id"] = df["record_id"].map(cluster_map)
 
-    # --- Step 3: Load social handles per cluster (match by phone) ---
-    social_df = pd.read_csv(social_path)
-    # Map handle -> platform
-    handle_by_device: Dict[str, Tuple[str, str]] = {}
-    for _, row in social_df.iterrows():
-        handle_by_device[str(row.get("device_id", ""))] = (
-            str(row.get("user_handle", "")),
-            str(row.get("platform", ""))
-        )
-
-    # Build golden profiles grouped by cluster
+    # --- Step 3: Build golden profiles grouped by cluster ---
     cluster_groups = df.groupby("z_cluster_id")
 
     golden_profiles = []
@@ -158,7 +144,7 @@ async def run_entity_resolution() -> Dict:
         names = [n for n in group["full_name"].dropna().tolist() if n]
         phones = list(set(p for p in group["phone_normalized"].dropna().tolist() if p))
         emails = list(set(e for e in group["email"].dropna().tolist() if e and str(e).lower() not in ("nan", "")))
-        accounts = []  # Will be linked from bank statements
+        accounts = []
         addresses = list(set(a for a in group["address"].dropna().tolist() if a))
         national_ids = list(set(n for n in group["national_id"].dropna().tolist() if n and str(n).lower() not in ("nan", "")))
 
@@ -166,7 +152,7 @@ async def run_entity_resolution() -> Dict:
         primary_name = max(names, key=len) if names else cluster_id
         aliases = [n for n in names if n != primary_name]
 
-        # Risk score based on heuristics: multiple IDs, burner patterns
+        # Heuristic risk scoring
         risk_score = 0.3
         if len(names) >= 3:
             risk_score += 0.3
@@ -185,36 +171,34 @@ async def run_entity_resolution() -> Dict:
             "associated_emails": emails,
             "known_addresses": addresses,
             "national_ids": national_ids,
-            "social_handles": [],  # filled below
+            "social_handles": [],
             "risk_score": risk_score,
             "method": zingg_method,
-            "last_updated": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+            "last_updated": datetime.datetime.now(datetime.timezone.utc)
         })
 
-    # --- Step 4: Link social handles by matching phone/handle across datasets ---
-    # Build a phone->cluster lookup
+    # --- Step 4: Link social handles by matching registered_phone ---
     phone_to_cluster: Dict[str, str] = {}
     for _, row in df.iterrows():
         ph = row.get("phone_normalized")
         if ph:
             phone_to_cluster[ph] = row["z_cluster_id"]
 
-    # Link social handles by matching their registered_phone
     social_cluster_map: Dict[str, Tuple[str, str]] = {}
-    social_df_dedup = social_df.drop_duplicates(subset=["user_handle"])
-    
-    for _, row in social_df_dedup.iterrows():
-        handle = str(row.get("user_handle", ""))
-        platform = str(row.get("platform", ""))
-        ph = normalize_phone(row.get("registered_phone"))
-        if ph:
-            cluster = phone_to_cluster.get(ph)
-            if cluster:
+    handle_to_cluster: Dict[str, str] = {}
+    if os.path.exists(social_path):
+        social_df = pd.read_csv(social_path)
+        social_df_dedup = social_df.drop_duplicates(subset=["user_handle"])
+        for _, row in social_df_dedup.iterrows():
+            handle = str(row.get("user_handle", ""))
+            platform = str(row.get("platform", ""))
+            ph = normalize_phone(row.get("registered_phone"))
+            if ph and ph in phone_to_cluster:
+                cluster = phone_to_cluster[ph]
                 social_cluster_map[handle] = (platform, cluster)
-    
-    # Attach social handles to golden profiles
+                handle_to_cluster[handle] = cluster
+
     cluster_to_profile_idx: Dict[str, int] = {p["z_cluster_id"]: i for i, p in enumerate(golden_profiles)}
-    
     for handle, (platform, cluster_id) in social_cluster_map.items():
         idx = cluster_to_profile_idx.get(cluster_id)
         if idx is not None:
@@ -222,48 +206,48 @@ async def run_entity_resolution() -> Dict:
                 "handle": handle,
                 "platform": platform
             })
-    bank_path = os.path.join(DATA_DIR, "bank_statements.csv")
-    try:
-        bank_df = pd.read_csv(bank_path)
-        for _, row in bank_df.iterrows():
-            ph = normalize_phone(row.get("linked_phone"))
-            acc = str(row.get("account_number", ""))
-            cluster = phone_to_cluster.get(ph) if ph else None
-            if cluster and acc:
-                idx = cluster_to_profile_idx.get(cluster)
-                if idx is not None and acc not in golden_profiles[idx]["known_accounts"]:
-                    golden_profiles[idx]["known_accounts"].append(acc)
-    except:
-        pass
 
-    # --- Step 6: Persist to MongoDB ---
-    await db_client.golden_col.delete_many({})
-    if golden_profiles:
-        await db_client.golden_col.insert_many(golden_profiles)
+    # --- Step 5: Link bank accounts by matching linked_phone ---
+    if os.path.exists(bank_path):
+        try:
+            bank_df = pd.read_csv(bank_path)
+            for _, row in bank_df.iterrows():
+                ph = normalize_phone(row.get("linked_phone"))
+                acc = str(row.get("account_number", "")).strip()
+                cluster = phone_to_cluster.get(ph) if ph else None
+                if cluster and acc:
+                    idx = cluster_to_profile_idx.get(cluster)
+                    if idx is not None and acc not in golden_profiles[idx]["known_accounts"]:
+                        golden_profiles[idx]["known_accounts"].append(acc)
+        except Exception:
+            pass
 
-    # --- Step 7: Backfill z_cluster_id on normalized_events by phone match ---
-    phone_cluster_updates = []
-    for _, row in df.iterrows():
-        ph = row.get("phone_normalized")
-        if ph:
-            phone_cluster_updates.append((ph, row["z_cluster_id"]))
+    # --- Step 6: Persist Golden Profiles to PostgreSQL (Zero Mongo) ---
+    with get_db_context() as db:
+        # Clear existing resolved profiles and re-insert fresh golden clusters
+        db.query(GoldenProfileModel).delete()
+        for p in golden_profiles:
+            db.add(GoldenProfileModel(
+                z_cluster_id=p["z_cluster_id"],
+                primary_name=p["primary_name"],
+                known_aliases=p["known_aliases"],
+                known_phones=p["known_phones"],
+                known_accounts=p["known_accounts"],
+                associated_emails=p["associated_emails"],
+                known_addresses=p["known_addresses"],
+                national_ids=p["national_ids"],
+                social_handles=p["social_handles"],
+                risk_score=p["risk_score"],
+                method=p["method"],
+                last_updated=p["last_updated"]
+            ))
 
-    for phone, cluster_id in phone_cluster_updates:
-        await db_client.events_col.update_many(
-            {"normalized_identity.phone": phone},
-            {"$set": {"z_cluster_id": cluster_id}}
-        )
-
-    # Also backfill social events by social_handle
-    for handle, (platform, cluster_id) in social_cluster_map.items():
-        await db_client.events_col.update_many(
-            {"normalized_identity.social_handle": handle},
-            {"$set": {"z_cluster_id": cluster_id}}
-        )
+    # --- Step 7: Backfill z_cluster_id into MinIO Parquet canonical warehouse ---
+    canonical_reader.backfill_cluster_ids(phone_to_cluster, handle_to_cluster)
 
     clusters_count = len(golden_profiles)
     total_records = len(df)
-    print(f"[Zingg ER] Resolved {total_records} records into {clusters_count} clusters using {zingg_method}")
+    print(f"[Zingg ER] Successfully resolved {total_records} records into {clusters_count} golden clusters in PostgreSQL using {zingg_method}")
 
     return {
         "status": "success",

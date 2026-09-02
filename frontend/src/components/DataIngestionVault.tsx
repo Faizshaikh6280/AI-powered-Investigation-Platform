@@ -1,75 +1,284 @@
-import React from 'react';
+'use client';
+
+import React, { useState, useRef } from 'react';
 import { 
-  UploadCloud, Smartphone, CreditCard, Globe, 
-  CheckCircle2, AlertCircle, Clock
+  UploadCloud, FileSpreadsheet, Smartphone, CreditCard, Globe, 
+  CheckCircle2, AlertCircle, Clock, ShieldCheck, Hash, Play,
+  Loader2, RefreshCw, FileText, ArrowRight
 } from 'lucide-react';
+import { useCase } from '../context/CaseContext';
+import { apiClient, EvidenceItem } from '../services/apiClient';
 import { cn } from '../utils/cn';
 
-export default function DataIngestionVault() {
-  const sources = [
-    { name: 'CDR Data', icon: Smartphone, records: '142,841', status: 'Healthy', error: 0, date: '2 hours ago', color: 'text-indigo-500', bg: 'bg-indigo-500/10' },
-    { name: 'IPDR Logs', icon: Globe, records: '84,192', status: 'Warning', error: 12, date: '5 hours ago', color: 'text-blue-500', bg: 'bg-blue-500/10' },
-    { name: 'Bank Statements', icon: CreditCard, records: '4,812', status: 'Healthy', error: 0, date: '1 day ago', color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
-  ];
+interface DataIngestionVaultProps {
+  onNavigateToPipeline?: () => void;
+}
+
+export default function DataIngestionVault({ onNavigateToPipeline }: DataIngestionVaultProps) {
+  const { activeCase, activeCaseDetail, refreshCases } = useCase();
+  const [isUploading, setIsUploading] = useState(false);
+  const [isTriggering, setIsTriggering] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const evidenceList: EvidenceItem[] = activeCaseDetail?.evidence || [];
+
+  const handleFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0 || !activeCase) return;
+
+    setIsUploading(true);
+    setError(null);
+    setUploadStatus(`Uploading ${files.length} evidence file(s)...`);
+
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        setUploadStatus(`Uploading & analyzing ${file.name} (${i + 1}/${files.length})...`);
+        await apiClient.uploadEvidenceFile(activeCase.case_id, file);
+      }
+      setUploadStatus('Upload complete! Evidence encrypted and registered.');
+      await refreshCases();
+      setTimeout(() => setUploadStatus(null), 4000);
+    } catch (err: any) {
+      console.error('Evidence upload failed:', err);
+      setError(err.message || 'Failed to upload evidence files');
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleTriggerAll = async () => {
+    setIsTriggering(true);
+    setError(null);
+    try {
+      await apiClient.triggerAllIngestion();
+      await refreshCases();
+      if (onNavigateToPipeline) {
+        onNavigateToPipeline();
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to trigger ingestion pipeline');
+    } finally {
+      setIsTriggering(false);
+    }
+  };
+
+  const getSourceIcon = (sourceType: string) => {
+    const s = sourceType?.toUpperCase() || '';
+    if (s.includes('TELECOM') || s.includes('CDR')) return Smartphone;
+    if (s.includes('BANK')) return CreditCard;
+    if (s.includes('NETWORK') || s.includes('IPDR')) return Globe;
+    if (s.includes('SOCIAL')) return FileText;
+    return FileSpreadsheet;
+  };
+
+  const getSourceColor = (sourceType: string) => {
+    const s = sourceType?.toUpperCase() || '';
+    if (s.includes('TELECOM') || s.includes('CDR')) return 'text-indigo-500 bg-indigo-500/10 border-indigo-500/20';
+    if (s.includes('BANK')) return 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20';
+    if (s.includes('NETWORK') || s.includes('IPDR')) return 'text-blue-500 bg-blue-500/10 border-blue-500/20';
+    if (s.includes('SOCIAL')) return 'text-pink-500 bg-pink-500/10 border-pink-500/20';
+    return 'text-amber-500 bg-amber-500/10 border-amber-500/20';
+  };
+
+  if (!activeCase) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full p-8 text-center">
+        <AlertCircle className="w-12 h-12 text-muted-foreground mb-4" />
+        <h3 className="text-lg font-bold text-foreground">No Active Case Selected</h3>
+        <p className="text-sm text-muted-foreground mt-1 max-w-sm">
+          Please select or create an investigation case before uploading evidence.
+        </p>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col h-full bg-background p-6 md:p-8 max-w-7xl mx-auto w-full">
-      <div className="flex justify-between items-center mb-8 border-b border-border pb-4">
+    <div className="flex flex-col h-full bg-background p-6 md:p-8 max-w-7xl mx-auto w-full overflow-y-auto">
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8 border-b border-border pb-4">
         <div>
-          <h2 className="text-2xl font-semibold text-foreground">Data Sources</h2>
-          <p className="text-sm text-muted-foreground mt-1">Manage and import investigative data</p>
-        </div>
-        <button className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-sm">
-          <UploadCloud className="w-4 h-4" /> Import Dataset
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-        {sources.map((src, i) => (
-          <div key={i} className="bg-card border border-border p-6 rounded-xl flex flex-col hover:border-primary/50 transition-colors cursor-pointer shadow-sm group">
-            <div className="flex justify-between items-start mb-6">
-              <div className="flex items-center gap-3">
-                <div className={cn("p-2.5 rounded-md border border-border", src.bg, src.color)}>
-                  <src.icon className="w-5 h-5" />
-                </div>
-                <h3 className="font-semibold text-foreground">{src.name}</h3>
-              </div>
-              <div className={cn(
-                "px-2.5 py-0.5 rounded text-xs font-bold tracking-wider uppercase border",
-                src.status === 'Healthy' ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" : "bg-amber-500/10 text-amber-500 border-amber-500/20"
-              )}>
-                {src.status}
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <div>
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Records</p>
-                <p className="text-xl font-bold text-foreground">{src.records}</p>
-              </div>
-              <div>
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Errors</p>
-                <p className={cn("text-xl font-bold", src.error > 0 ? "text-amber-500" : "text-foreground")}>{src.error}</p>
-              </div>
-            </div>
-            
-            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-auto pt-4 border-t border-border">
-              <Clock className="w-3.5 h-3.5" /> Last imported {src.date}
-            </div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xs font-mono font-bold text-primary bg-primary/10 px-2 py-0.5 rounded border border-primary/20">
+              {activeCase.case_reference}
+            </span>
+            <span className="text-xs text-muted-foreground">• Active Dossier</span>
           </div>
-        ))}
+          <h2 className="text-2xl font-bold text-foreground">Evidence Intake & Automatic Classification</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Upload unlabelled raw evidence. The backend computes SHA-256 hashes, encrypts with AES-256-GCM, and auto-detects domain schemas.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
+            className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
+          >
+            {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
+            Upload Evidence Files
+          </button>
+          <button
+            onClick={handleTriggerAll}
+            disabled={isTriggering}
+            className="px-4 py-2 bg-secondary text-foreground border border-border text-sm font-medium rounded-lg hover:bg-secondary/80 transition-colors flex items-center gap-2 disabled:opacity-50"
+          >
+            {isTriggering ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 text-emerald-500" />}
+            Process All Files
+          </button>
+        </div>
       </div>
 
-      <div className="flex-1 bg-secondary/30 rounded-xl p-6 flex flex-col items-center justify-center border-dashed border-2 border-border hover:border-primary/50 hover:bg-secondary/50 transition-colors cursor-pointer group">
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => handleFiles(e.target.files)}
+      />
+
+      {/* Upload/Status Messages */}
+      {uploadStatus && (
+        <div className="mb-6 p-4 bg-primary/10 border border-primary/20 rounded-xl text-sm text-primary flex items-center gap-2">
+          <Loader2 className="w-4 h-4 animate-spin flex-shrink-0" />
+          <span>{uploadStatus}</span>
+        </div>
+      )}
+
+      {error && (
+        <div className="mb-6 p-4 bg-destructive/10 border border-destructive/20 rounded-xl text-sm text-destructive flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {/* Evidence Cards Grid */}
+      {evidenceList.length > 0 ? (
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
+              Ingested Evidence Files ({evidenceList.length})
+            </h3>
+            <button 
+              onClick={() => refreshCases()} 
+              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+            >
+              <RefreshCw className="w-3.5 h-3.5" /> Refresh
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {evidenceList.map((item) => {
+              const Icon = getSourceIcon(item.source_type);
+              const colorClass = getSourceColor(item.source_type);
+
+              return (
+                <div 
+                  key={item.evidence_id} 
+                  className="bg-card border border-border p-6 rounded-xl flex flex-col justify-between shadow-sm hover:border-primary/50 transition-colors group"
+                >
+                  <div>
+                    <div className="flex justify-between items-start mb-4">
+                      <div className="flex items-center gap-3">
+                        <div className={cn("p-2.5 rounded-lg border", colorClass)}>
+                          <Icon className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-foreground text-sm truncate max-w-[180px]" title={item.filename}>
+                            {item.filename}
+                          </h4>
+                          <span className="text-[11px] font-mono text-muted-foreground">
+                            {item.evidence_id.substring(0, 16)}...
+                          </span>
+                        </div>
+                      </div>
+
+                      <span className={cn(
+                        "text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border",
+                        item.status === 'COMPLETED' ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" :
+                        item.status === 'RUNNING' ? "bg-blue-500/10 text-blue-500 border-blue-500/20" :
+                        "bg-amber-500/10 text-amber-500 border-amber-500/20"
+                      )}>
+                        {item.status}
+                      </span>
+                    </div>
+
+                    {/* Detected Source Badge */}
+                    <div className="p-3 bg-secondary/50 rounded-lg border border-border space-y-1 mb-4">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                        Automatic Source Detection
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-black text-foreground">
+                          {item.source_type || 'UNKNOWN'}
+                        </span>
+                        {item.confidence > 0 && (
+                          <span className="text-xs font-mono font-bold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded">
+                            {(item.confidence * 100).toFixed(0)}% Confidence
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Records & Quality */}
+                    <div className="grid grid-cols-2 gap-3 mb-4 text-xs">
+                      <div>
+                        <div className="text-[10px] font-bold uppercase text-muted-foreground">Valid Records</div>
+                        <div className="text-lg font-black text-foreground">{item.records?.toLocaleString() || 0}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-bold uppercase text-muted-foreground">Quality Score</div>
+                        <div className="text-lg font-black text-primary">
+                          {item.quality_score ? `${(item.quality_score * 100).toFixed(0)}%` : '100%'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Hash Footer */}
+                  <div className="pt-3 border-t border-border flex items-center justify-between text-[11px] font-mono text-muted-foreground">
+                    <span className="flex items-center gap-1 truncate" title={item.sha256}>
+                      <Hash className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                      SHA: {item.sha256 ? `${item.sha256.substring(0, 12)}...` : 'N/A'}
+                    </span>
+                    <span className="flex items-center gap-1 text-emerald-500 font-bold">
+                      <ShieldCheck className="w-3.5 h-3.5" /> AES-256
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Drag and Drop Zone */}
+      <div 
+        onClick={() => fileInputRef.current?.click()}
+        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          handleFiles(e.dataTransfer.files);
+        }}
+        className="bg-secondary/20 rounded-xl p-10 flex flex-col items-center justify-center border-dashed border-2 border-border hover:border-primary/50 hover:bg-secondary/40 transition-all cursor-pointer group my-auto"
+      >
         <div className="w-16 h-16 rounded-full bg-card border border-border shadow-sm flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
           <UploadCloud className="w-8 h-8 text-muted-foreground group-hover:text-primary transition-colors" />
         </div>
-        <h3 className="text-lg font-semibold text-foreground mb-2">Drag & drop files to import</h3>
-        <p className="text-sm text-muted-foreground max-w-sm text-center mb-6">
-          Supported formats: CSV, Excel, PDF, JSON, TXT. Data fields will be automatically mapped to entities.
+        <h3 className="text-lg font-bold text-foreground mb-1">Drag & Drop Raw Evidence Files Here</h3>
+        <p className="text-sm text-muted-foreground max-w-md text-center mb-6">
+          Upload any telecom CDR/IPDR logs, bank transaction CSVs, device logs, or social media activity. 
+          No manual domain tagging needed — the backend will automatically classify each file.
         </p>
-        <button className="px-4 py-2 bg-card text-foreground text-sm font-medium rounded-md border border-border shadow-sm hover:bg-secondary transition-colors">
-          Browse Files
+        <button 
+          type="button"
+          className="px-5 py-2.5 bg-card text-foreground text-sm font-semibold rounded-lg border border-border shadow-sm hover:bg-secondary transition-colors"
+        >
+          Browse Local Files
         </button>
       </div>
     </div>

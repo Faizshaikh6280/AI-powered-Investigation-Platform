@@ -10,7 +10,7 @@ export default function TimelineFootprint() {
   const [events, setEvents] = useState<any[]>([]);
 
   useEffect(() => {
-    fetch('http://localhost:8000/api/geo/sync-data')
+    fetch('/api/geo/sync-data')
       .then(r => r.json())
       .then(data => {
         if (data.timeline && data.timeline.length > 0) {
@@ -32,6 +32,7 @@ export default function TimelineFootprint() {
               time: dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
               date: dateObj.toLocaleDateString(),
               type: ev.event_type.replace('_', ' '),
+              domain: ev.domain,
               icon, color, bg, border,
               content: <span className="text-sm font-medium text-foreground">{ev.identity?.phone || ev.financial?.account_number || ev.telemetry?.client_ip || 'System Event'}</span>,
               details: ev.telemetry?.tower_address ? [{ label: 'Location', value: ev.telemetry.tower_address }] : []
@@ -39,17 +40,11 @@ export default function TimelineFootprint() {
           });
           setEvents(formatted);
         } else {
-          // Fallback static
-          setEvents([
-            { id: '1', time: '08:14', date: 'Today', type: 'PHONE CALL', icon: Smartphone, color: 'text-indigo-500', bg: 'bg-indigo-500/10', border: 'border-indigo-500/20', content: <span className="font-mono text-foreground font-medium">+91 98765 43210</span>, details: [{label: 'Cell Tower', value: 'Mohali Sector 62'}] },
-            { id: '2', time: '08:28', date: 'Today', type: 'BANK TRANSFER', icon: CreditCard, color: 'text-emerald-500', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', content: <span className="text-emerald-500 font-bold text-lg">₹85,000</span>, details: [] }
-          ]);
+          setEvents([]);
         }
       })
       .catch(() => {
-        setEvents([
-          { id: '1', time: '08:14', date: 'Today', type: 'PHONE CALL', icon: Smartphone, color: 'text-indigo-500', bg: 'bg-indigo-500/10', border: 'border-indigo-500/20', content: <span className="font-mono text-foreground font-medium">+91 98765 43210</span>, details: [{label: 'Cell Tower', value: 'Mohali Sector 62'}] },
-        ]);
+        setEvents([]);
       });
   }, []);
 

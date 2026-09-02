@@ -5,39 +5,46 @@ import {
   Search, Bell, HelpCircle, User, Activity, FolderOpen, Database, 
   Users, Share2, Clock, Map, AlertTriangle, FileText, Smartphone, 
   Globe, BarChart3, ShieldCheck, Settings, LogOut, ChevronRight,
-  Sun, Moon, Menu, Command, X
+  Sun, Moon, Menu, Command, X, Cpu, Plus, Layers
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { cn } from '../utils/cn';
+import { CaseProvider, useCase } from '../context/CaseContext';
 
 // Modules
 import OverviewDashboard from '../components/OverviewDashboard';
+import CaseManagementView from '../components/CaseManagementView';
+import DataIngestionVault from '../components/DataIngestionVault';
+import ProcessingPipelineView from '../components/ProcessingPipelineView';
+import EntityResolutionMatrix from '../components/EntityResolutionMatrix';
 import GraphTopologyViewer from '../components/GraphTopologyViewer';
 import TimelineFootprint from '../components/TimelineFootprint';
+import GeospatialMap from '../components/GeospatialMap';
 import AnomaliesTab from '../components/AnomaliesTab';
 import AnomalyInvestigationDrawer from '../components/AnomalyInvestigationDrawer';
+import CaseDossierExporter from '../components/CaseDossierExporter';
+import AuditTrailLogs from '../components/AuditTrailLogs';
+import CreateCaseModal from '../components/CreateCaseModal';
 
 const navigation = [
   { id: 'overview', label: 'Overview', icon: Activity },
-  { id: 'investigations', label: 'Investigations', icon: FolderOpen },
-  { id: 'data-sources', label: 'Data Sources', icon: Database },
+  { id: 'investigations', label: 'Case Dossiers', icon: FolderOpen },
+  { id: 'data-sources', label: 'Evidence Intake', icon: Database },
+  { id: 'pipeline', label: 'Processing Pipeline', icon: Cpu },
   { id: 'entity-explorer', label: 'Entity Explorer', icon: Users },
   { id: 'relationship-graph', label: 'Relationship Graph', icon: Share2 },
   { id: 'timeline', label: 'Timeline', icon: Clock },
-  { id: 'geospatial', label: 'Geospatial', icon: Map },
-  { id: 'anomalies', label: 'Anomalies & Alerts', icon: AlertTriangle },
-  { id: 'transactions', label: 'Transactions', icon: FileText },
-  { id: 'telecom', label: 'Telecom Analysis', icon: Smartphone },
-  { id: 'social', label: 'Social Intelligence', icon: Globe },
-  { id: 'reports', label: 'Reports & Evidence', icon: BarChart3 },
-  { id: 'audit', label: 'Audit Logs', icon: ShieldCheck },
-  { id: 'administration', label: 'Administration', icon: Settings },
+  { id: 'geospatial', label: 'Geospatial Map', icon: Map },
+  { id: 'anomalies', label: 'Anomalies & Radar', icon: AlertTriangle },
+  { id: 'reports', label: 'Reports & Export', icon: BarChart3 },
+  { id: 'audit', label: 'Audit Trail', icon: ShieldCheck },
 ];
 
-export default function Page() {
+function InvestigationWorkspace() {
+  const { cases, activeCase, setActiveCaseId } = useCase();
   const [activeTab, setActiveTab] = useState('overview');
   const [isSidebarExpanded, setSidebarExpanded] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
   
   const [selectedAnomaly, setSelectedAnomaly] = useState<any>(null);
@@ -76,9 +83,9 @@ export default function Page() {
       >
         <div className="h-14 flex items-center justify-center px-4 border-b border-border">
           <div className="flex items-center gap-2 text-primary font-bold text-xl tracking-tight overflow-hidden whitespace-nowrap w-full">
-            <ShieldCheck className="w-6 h-6 flex-shrink-0" />
-            <div className={cn("transition-opacity duration-300", isSidebarExpanded ? "opacity-100" : "opacity-0 w-0")}>
-              TRACE
+            <ShieldCheck className="w-6 h-6 flex-shrink-0 text-primary" />
+            <div className={cn("transition-opacity duration-300 font-mono tracking-widest", isSidebarExpanded ? "opacity-100" : "opacity-0 w-0")}>
+              TRACE <span className="text-[10px] font-sans font-bold bg-primary/10 text-primary px-1.5 py-0.5 rounded border border-primary/20">V2</span>
             </div>
           </div>
         </div>
@@ -110,12 +117,42 @@ export default function Page() {
         
         {/* Top Header */}
         <header className="h-14 flex-shrink-0 flex items-center justify-between px-4 border-b border-border bg-background z-20">
+          {/* Dynamic Active Case Switcher */}
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span>INV-2026-0142</span>
-            <ChevronRight className="w-4 h-4" />
-            <span className="text-foreground font-medium">Cross-Domain Network</span>
+            <div className="flex items-center gap-2 bg-secondary/80 border border-border px-2.5 py-1 rounded-lg">
+              <FolderOpen className="w-4 h-4 text-primary flex-shrink-0" />
+              {cases.length > 0 ? (
+                <select
+                  value={activeCase?.case_id || ''}
+                  onChange={(e) => setActiveCaseId(e.target.value)}
+                  className="bg-transparent border-none outline-none text-xs font-bold text-foreground cursor-pointer max-w-[220px] truncate"
+                >
+                  {cases.map((c) => (
+                    <option key={c.case_id} value={c.case_id} className="bg-card text-foreground">
+                      {c.case_reference}: {c.title}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="text-xs font-bold text-muted-foreground">No Cases</span>
+              )}
+              <button
+                onClick={() => setIsCreateModalOpen(true)}
+                className="p-0.5 text-muted-foreground hover:text-primary transition-colors ml-1"
+                title="Create New Case Dossier"
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            
+            {activeCase?.status && (
+              <span className="hidden sm:inline-block text-[10px] font-bold uppercase tracking-wider text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                {activeCase.status}
+              </span>
+            )}
           </div>
 
+          {/* Quick Search */}
           <div className="flex-1 max-w-xl px-8 hidden md:block">
             <button 
               onClick={() => setCmdOpen(true)}
@@ -129,10 +166,15 @@ export default function Page() {
             </button>
           </div>
 
+          {/* Right Header Icons */}
           <div className="flex items-center gap-2">
-            <button className="relative p-2 text-muted-foreground hover:text-foreground rounded-md hover:bg-secondary transition-colors">
+            <button 
+              onClick={() => setActiveTab('anomalies')}
+              className="relative p-2 text-muted-foreground hover:text-foreground rounded-md hover:bg-secondary transition-colors"
+              title="Anomalies Radar"
+            >
               <Bell className="w-4 h-4" />
-              <span className="absolute top-1.5 right-1.5 block h-1.5 w-1.5 rounded-full bg-destructive ring-2 ring-background" />
+              <span className="absolute top-1.5 right-1.5 block h-1.5 w-1.5 rounded-full bg-destructive ring-2 ring-background animate-pulse" />
             </button>
             <button 
               onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
@@ -141,42 +183,95 @@ export default function Page() {
               {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
             <div className="w-px h-5 bg-border mx-2" />
-            <div className="w-8 h-8 rounded-full bg-secondary border border-border flex items-center justify-center cursor-pointer">
+            <div 
+              onClick={() => setActiveTab('investigations')}
+              className="w-8 h-8 rounded-full bg-secondary border border-border flex items-center justify-center cursor-pointer hover:border-primary transition-colors"
+              title="Investigator Profile"
+            >
               <User className="w-4 h-4 text-muted-foreground" />
             </div>
           </div>
         </header>
 
-        {/* Dynamic Canvas - Always gives max space */}
+        {/* Dynamic Canvas */}
         <main className="flex-1 overflow-auto relative">
-          {activeTab === 'overview' && <OverviewDashboard />}
-          {activeTab === 'relationship-graph' && <GraphTopologyViewer focusEntityId={focusAnomalyEntityId} />}
-          {activeTab === 'timeline' && <TimelineFootprint />}
-          {activeTab === 'anomalies' && <AnomaliesTab onAnomalySelect={(a) => setSelectedAnomaly(a)} />}
-          
-          {/* Fallback for unbuilt components */}
-          {!['overview', 'relationship-graph', 'timeline', 'anomalies'].includes(activeTab) && (
-            <div className="p-8 flex items-center justify-center h-full">
-              <div className="max-w-md text-center space-y-3">
-                <div className="w-12 h-12 bg-secondary rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Activity className="w-6 h-6 text-muted-foreground" />
-                </div>
-                <h3 className="text-lg font-medium text-foreground">{navigation.find(n => n.id === activeTab)?.label}</h3>
-                <p className="text-sm text-muted-foreground">This module is part of the advanced functional workspace. Toggle advanced functionality to view.</p>
-              </div>
-            </div>
+          {activeTab === 'overview' && (
+            <OverviewDashboard onNavigateTab={(tab) => setActiveTab(tab)} />
+          )}
+
+          {activeTab === 'investigations' && (
+            <CaseManagementView onSelectCaseTab={(tab) => setActiveTab(tab)} />
+          )}
+
+          {activeTab === 'data-sources' && (
+            <DataIngestionVault onNavigateToPipeline={() => setActiveTab('pipeline')} />
+          )}
+
+          {activeTab === 'pipeline' && (
+            <ProcessingPipelineView onNavigateToTab={(tab) => setActiveTab(tab)} />
+          )}
+
+          {activeTab === 'entity-explorer' && (
+            <EntityResolutionMatrix 
+              onViewOnGraph={(entityId) => {
+                setFocusAnomalyEntityId(entityId);
+                setActiveTab('relationship-graph');
+              }}
+              onNavigateToAnomalies={() => setActiveTab('anomalies')}
+            />
+          )}
+
+          {activeTab === 'relationship-graph' && (
+            <GraphTopologyViewer focusEntityId={focusAnomalyEntityId} />
+          )}
+
+          {activeTab === 'timeline' && (
+            <TimelineFootprint />
+          )}
+
+          {activeTab === 'geospatial' && (
+            <GeospatialMap />
+          )}
+
+          {activeTab === 'anomalies' && (
+            <AnomaliesTab 
+              onAnomalySelect={(anomaly) => setSelectedAnomaly(anomaly)} 
+            />
+          )}
+
+          {activeTab === 'reports' && (
+            <CaseDossierExporter />
+          )}
+
+          {activeTab === 'audit' && (
+            <AuditTrailLogs />
           )}
         </main>
       </div>
 
+      {/* Deep Anomaly Investigation Drawer */}
       <AnomalyInvestigationDrawer 
         anomaly={selectedAnomaly} 
         onClose={() => setSelectedAnomaly(null)}
         onViewOnGraph={(entityId) => {
-           setFocusAnomalyEntityId(entityId);
-           setSelectedAnomaly(null);
-           setActiveTab('relationship-graph');
+          setFocusAnomalyEntityId(entityId);
+          setSelectedAnomaly(null);
+          setActiveTab('relationship-graph');
         }}
+        onViewInTimeline={(entityId) => {
+          setSelectedAnomaly(null);
+          setActiveTab('timeline');
+        }}
+        onViewOnMap={(entityId) => {
+          setSelectedAnomaly(null);
+          setActiveTab('geospatial');
+        }}
+      />
+
+      {/* Create Case Modal */}
+      <CreateCaseModal 
+        isOpen={isCreateModalOpen} 
+        onClose={() => setIsCreateModalOpen(false)} 
       />
 
       {/* Command Palette Modal */}
@@ -188,16 +283,27 @@ export default function Page() {
               <input 
                 autoFocus
                 type="text" 
-                placeholder="Search TRACE..." 
-                className="flex-1 bg-transparent border-none outline-none text-foreground placeholder:text-muted-foreground"
+                placeholder="Search TRACE entities, cases, phones, accounts..." 
+                className="flex-1 bg-transparent border-none outline-none text-foreground placeholder:text-muted-foreground text-sm"
               />
               <kbd className="font-mono text-xs text-muted-foreground bg-secondary px-1.5 py-0.5 rounded border border-border">ESC</kbd>
             </div>
-            <div className="p-2 max-h-[60vh] overflow-y-auto">
+            <div className="p-2 max-h-[60vh] overflow-y-auto space-y-1">
               <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Quick Actions</div>
-              {['Search Entity', 'Open Investigation', 'Open Graph', 'Generate Report'].map((cmd, i) => (
-                <button key={i} className="w-full text-left px-3 py-2 rounded-md text-sm text-foreground hover:bg-secondary hover:text-primary transition-colors flex items-center gap-2">
-                  <Command className="w-4 h-4 text-muted-foreground" /> {cmd}
+              {[
+                { label: 'Create New Case Dossier', action: () => { setCmdOpen(false); setIsCreateModalOpen(true); } },
+                { label: 'Open Multi-Engine Anomaly Radar', action: () => { setCmdOpen(false); setActiveTab('anomalies'); } },
+                { label: 'View Relationship Graph Topology', action: () => { setCmdOpen(false); setActiveTab('relationship-graph'); } },
+                { label: 'View Zingg Entity Resolution', action: () => { setCmdOpen(false); setActiveTab('entity-explorer'); } },
+                { label: 'Ingest Evidence Files', action: () => { setCmdOpen(false); setActiveTab('data-sources'); } },
+                { label: 'Run Processing Pipeline', action: () => { setCmdOpen(false); setActiveTab('pipeline'); } },
+              ].map((cmd, i) => (
+                <button 
+                  key={i} 
+                  onClick={cmd.action}
+                  className="w-full text-left px-3 py-2 rounded-md text-sm text-foreground hover:bg-secondary hover:text-primary transition-colors flex items-center gap-2"
+                >
+                  <Command className="w-4 h-4 text-muted-foreground" /> {cmd.label}
                 </button>
               ))}
             </div>
@@ -205,5 +311,13 @@ export default function Page() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function Page() {
+  return (
+    <CaseProvider>
+      <InvestigationWorkspace />
+    </CaseProvider>
   );
 }

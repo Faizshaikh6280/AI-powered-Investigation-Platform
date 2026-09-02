@@ -18,7 +18,7 @@ def extract_label(labels, props):
 
 @router.get("/topology")
 async def get_graph_topology():
-    if not neo4j_client.is_connected:
+    if not neo4j_client.ensure_connected():
         return {"nodes": [], "edges": []}
 
     query = """

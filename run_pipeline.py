@@ -1,7 +1,7 @@
 """Full pipeline: reset → ingest → ER → graph sync"""
 import urllib.request, json, time
 
-BASE = 'http://localhost:8000'
+BASE = 'http://127.0.0.1:8000'
 
 def post(url):
     req = urllib.request.Request(url, method='POST')
