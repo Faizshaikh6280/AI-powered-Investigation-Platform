@@ -1,4 +1,4 @@
-import hashlib
+﻿import hashlib
 import uuid
 from typing import List, Dict, Any
 from app.anomaly.schemas.anomaly_contracts import (
@@ -43,6 +43,10 @@ class UnifiedScoringEngine:
 
         scores = []
         confidences = []
+        
+        gds_score = 0.0
+        ml_base_score = 0.0
+        ml_detector_name = "N/A"
 
         for r in flagged_results:
             contributing_detectors.append(r.detector_id)
@@ -53,13 +57,38 @@ class UnifiedScoringEngine:
             all_metrics.update(r.features)
             scores.append(r.normalized_score)
             confidences.append(r.confidence)
+            
+            if r.detector_id == "DET-GDS-CENTRALITY":
+                gds_score = r.normalized_score
+            elif r.normalized_score > ml_base_score:
+                ml_base_score = r.normalized_score
+                ml_detector_name = r.detector_id
 
-        # Multi-lens fusion formula:
-        # Base score is the maximum triggered detector score
-        # Corroboration bonus: +8 points per additional corroborating detector lens (capped at +25)
-        base_score = max(scores)
+        # Explicitly define Risk Score Calculation as requested
+        # Base ML/Rule Score (max of all non-GDS)
+        if ml_base_score == 0.0:
+            ml_base_score = gds_score
+            ml_detector_name = "DET-GDS-CENTRALITY"
+
+        base_score = ml_base_score
+        
+        # Corroboration Bonus: +8 points per additional corroborating detector lens (capped at +25)
         corroboration_bonus = min(25.0, (len(flagged_results) - 1) * 8.0) if len(flagged_results) > 1 else 0.0
-        unified_score = min(100.0, base_score + corroboration_bonus)
+        
+        # GDS Multiplier: Up to 1.25x if entity is a structural graph hub
+        gds_multiplier = 1.0 + (gds_score / 100.0) * 0.25 
+        
+        # Final Formula
+        raw_unified = (base_score + corroboration_bonus) * gds_multiplier
+        unified_score = min(100.0, raw_unified)
+        
+        # Insert transparent calculation logic directly into signals (which maps to reasons in UI)
+        calc_reason = (
+            f"Risk Score Formula: [(Base {ml_detector_name}: {round(base_score, 1)}) + "
+            f"(Corroboration Bonus for {len(flagged_results)-1} extra engines: +{round(corroboration_bonus, 1)})] "
+            f"* (GDS Centrality Multiplier: {round(gds_multiplier, 2)}x) = {round(unified_score, 1)} Final Score."
+        )
+        all_signals.insert(0, calc_reason)
 
         avg_confidence = float(sum(confidences) / len(confidences)) if confidences else 1.0
 
@@ -93,6 +122,14 @@ class UnifiedScoringEngine:
 
         fingerprint = self.calculate_fingerprint(case_id, entity_id, primary_result.detector_id)
         finding_id = f"ANOMALY-{fingerprint[:8].upper()}-{str(uuid.uuid4())[:6].upper()}"
+        
+        # Ensure metrics contains the calculation breakdown for the table
+        all_metrics["risk_calculation"] = {
+            "base_score": round(base_score, 1),
+            "corroboration_bonus": round(corroboration_bonus, 1),
+            "gds_multiplier": round(gds_multiplier, 2),
+            "final_score": round(unified_score, 1)
+        }
 
         finding = UnifiedFindingContract(
             finding_id=finding_id,

@@ -8,6 +8,7 @@ from app.api.zingg import router as zingg_router
 from app.api.geo_timeline import router as geo_timeline_router
 from app.api.anomaly import router as anomaly_router
 from app.api.cases import router as cases_router
+from app.api.investigation import router as investigation_router
 from app.core.database import init_postgres, get_db_context
 from app.core.storage import storage_service
 from app.models.postgres_models import GoldenProfileModel
@@ -38,6 +39,7 @@ app.include_router(zingg_router, prefix="/api/zingg", tags=["Zingg ML"])
 app.include_router(graph_router, prefix="/api/graph", tags=["Graph Sync"])
 app.include_router(geo_timeline_router, prefix="/api/geo", tags=["Geo Timeline"])
 app.include_router(anomaly_router, prefix="/api/anomalies", tags=["Anomalies"])
+app.include_router(investigation_router)
 
 @app.post("/api/system/reset")
 async def reset_all():

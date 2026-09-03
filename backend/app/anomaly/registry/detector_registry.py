@@ -1,4 +1,4 @@
-from typing import List, Dict, Type
+﻿from typing import List, Dict, Type
 from app.anomaly.engines.base import BaseDetector
 from app.anomaly.engines.behavioral.isolation_forest import BehavioralIsolationForestDetector
 from app.anomaly.engines.rules.rule_engine import DeterministicRuleEngine
@@ -21,6 +21,7 @@ from app.anomaly.engines.advanced_ml.autoencoder import NeuralAutoencoderDetecto
 from app.anomaly.engines.advanced_ml.node2vec_engine import Node2VecGraphEmbeddingDetector
 from app.anomaly.engines.advanced_ml.gnn_architectures import RelationalGNNAnomalyDetector
 from app.anomaly.engines.advanced_ml.tgn_engine import TemporalGraphNetworkDetector
+from app.anomaly.engines.graph.gds_engine import GraphDataScienceEngine
 
 class DetectorRegistry:
     """
@@ -55,6 +56,7 @@ class DetectorRegistry:
         self.register(Node2VecGraphEmbeddingDetector())
         self.register(RelationalGNNAnomalyDetector())
         self.register(TemporalGraphNetworkDetector())
+        self.register(GraphDataScienceEngine())
 
     def register(self, detector: BaseDetector):
         self._detectors.append(detector)

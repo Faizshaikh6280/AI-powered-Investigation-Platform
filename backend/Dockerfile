@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Copy requirements and install precompiled dependencies
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip install --default-timeout=1000 -r requirements.txt
 
 # Copy backend source
 COPY . .

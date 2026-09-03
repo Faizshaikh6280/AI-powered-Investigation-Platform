@@ -5,7 +5,7 @@ import {
   Search, Bell, HelpCircle, User, Activity, FolderOpen, Database, 
   Users, Share2, Clock, Map, AlertTriangle, FileText, Smartphone, 
   Globe, BarChart3, ShieldCheck, Settings, LogOut, ChevronRight,
-  Sun, Moon, Menu, Command, X, Cpu, Plus, Layers
+  Sun, Moon, Menu, Command, X, Cpu, Plus, Layers, Crosshair
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { cn } from '../utils/cn';
@@ -24,10 +24,12 @@ import AnomaliesTab from '../components/AnomaliesTab';
 import AnomalyInvestigationDrawer from '../components/AnomalyInvestigationDrawer';
 import CaseDossierExporter from '../components/CaseDossierExporter';
 import AuditTrailLogs from '../components/AuditTrailLogs';
-import CreateCaseModal from '../components/CreateCaseModal';
+import { InvestigationDashboard } from '../components/InvestigationDashboard';
+import { CreateCaseModal } from '../components/CreateCaseModal';
 
 const navigation = [
   { id: 'overview', label: 'Overview', icon: Activity },
+  { id: 'agentic', label: 'Agentic Forensics', icon: Crosshair },
   { id: 'investigations', label: 'Case Dossiers', icon: FolderOpen },
   { id: 'data-sources', label: 'Evidence Intake', icon: Database },
   { id: 'pipeline', label: 'Processing Pipeline', icon: Cpu },
@@ -245,6 +247,10 @@ function InvestigationWorkspace() {
 
           {activeTab === 'audit' && (
             <AuditTrailLogs />
+          )}
+
+          {activeTab === 'agentic' && (
+            <InvestigationDashboard activeCaseId={activeCase?.case_id || ""} />
           )}
         </main>
       </div>

@@ -57,7 +57,7 @@ def get_detector_health():
         ]
     }
 
-@router.get("/")
+@router.get("")
 def get_anomalies(
     severity: str = "",
     entity_type: str = "",
