@@ -22,8 +22,8 @@ async def get_graph_topology():
         return {"nodes": [], "edges": []}
 
     query = """
-    MATCH (n)
-    OPTIONAL MATCH (n)-[r]->(m)
+    MATCH (n) WHERE NOT 'Anomaly' IN labels(n)
+    OPTIONAL MATCH (n)-[r]->(m) WHERE NOT 'Anomaly' IN labels(m)
     RETURN 
         id(n) AS source_id, 
         labels(n) AS source_labels, 
