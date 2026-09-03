@@ -143,11 +143,13 @@ services:
     environment:
       - BACKEND_URL=http://fastapi_backend:8000
       - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NODE_OPTIONS=--max-old-space-size=2048
+      - WATCHPACK_POLLING=true
     volumes:
       - ./frontend:/app
       - /app/node_modules
       - /app/.next
-    command: npm run dev
+    command: npx next dev --turbo
     restart: always
 
   mongodb:
