@@ -1,3 +1,4 @@
+from typing import Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import os
@@ -47,15 +48,32 @@ async def reset_all():
     return await clear_and_reset()
 
 @app.get("/api/system/golden_profiles")
-async def get_golden_profiles():
+async def get_golden_profiles(case_id: Optional[str] = None):
     """
-    Retrieves resolved golden entity profiles from PostgreSQL.
+    Retrieves resolved golden entity profiles from PostgreSQL for the requested case_id.
     Replaces MongoDB collection with identical JSON response structure.
     """
     with get_db_context() as db:
-        profiles = db.query(GoldenProfileModel).all()
+        target_case_id = case_id
+        if not target_case_id:
+            from app.models.postgres_models import CaseModel
+            c = db.query(CaseModel).order_by(CaseModel.created_at.desc()).first()
+            if not c:
+                return []
+            target_case_id = c.case_id
+
+        profiles = db.query(GoldenProfileModel).filter(GoldenProfileModel.case_id == target_case_id).all()
+        if not profiles:
+            from app.processing.canonical_reader import canonical_reader
+            events = canonical_reader.read_all_events(case_id=target_case_id)
+            if events:
+                from app.services.zingg_er import run_entity_resolution
+                await run_entity_resolution(case_id=target_case_id)
+                profiles = db.query(GoldenProfileModel).filter(GoldenProfileModel.case_id == target_case_id).all()
+
         return [{
             "z_cluster_id": p.z_cluster_id,
+            "case_id": p.case_id,
             "primary_name": p.primary_name,
             "known_aliases": p.known_aliases or [],
             "known_phones": p.known_phones or [],

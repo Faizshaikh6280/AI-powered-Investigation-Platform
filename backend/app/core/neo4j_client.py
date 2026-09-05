@@ -8,13 +8,24 @@ class Neo4jClient:
         self.ensure_connected()
 
     def ensure_connected(self):
-        if self.is_connected and self.driver:
-            return True
+        if self.driver:
+            try:
+                self.driver.verify_connectivity()
+                self.is_connected = True
+                return True
+            except Exception:
+                try:
+                    self.driver.close()
+                except Exception:
+                    pass
+                self.driver = None
+                self.is_connected = False
         try:
             self.driver = GraphDatabase.driver(
                 settings.NEO4J_URI,
                 auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD),
-                max_connection_lifetime=200,
+                max_connection_lifetime=60,
+                connection_acquisition_timeout=10,
                 keep_alive=True
             )
             self.driver.verify_connectivity()

@@ -7,11 +7,17 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+import logging
+
 from app.core.database import get_db
-from app.models.postgres_models import CaseModel, EvidenceModel, QuarantineRecordModel, DataQualityReportModel
+from app.models.postgres_models import (
+    CaseModel, EvidenceModel, QuarantineRecordModel, DataQualityReportModel,
+    GoldenProfileModel, DetectionSignalModel, AnomalyFindingModel, AnomalyRunModel, AuditLogModel
+)
 from app.services.ingestion_service import process_file
 from app.core.storage import storage_service
 
+logger = logging.getLogger("investigation.api.cases")
 router = APIRouter(prefix="/cases", tags=["Cases & Evidence Intake"])
 
 class CaseCreateRequest(BaseModel):
@@ -33,7 +39,24 @@ class CaseResponse(BaseModel):
 def create_case(payload: CaseCreateRequest, db: Session = Depends(get_db)):
     """Create a new formal investigation case with investigator context."""
     case_id = f"CASE-{uuid.uuid4().hex[:8].upper()}"
-    case_ref = payload.case_reference or f"INV-{datetime.datetime.now().year}-{uuid.uuid4().hex[:4].upper()}"
+
+    if payload.case_reference and payload.case_reference.strip():
+        req_ref = payload.case_reference.strip()
+        existing = db.query(CaseModel).filter_by(case_reference=req_ref).first()
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Case reference '{req_ref}' already exists. Please choose a unique case reference."
+            )
+        case_ref = req_ref
+    else:
+        for _ in range(5):
+            candidate_ref = f"INV-{datetime.datetime.now().year}-{uuid.uuid4().hex[:6].upper()}"
+            if not db.query(CaseModel).filter_by(case_reference=candidate_ref).first():
+                case_ref = candidate_ref
+                break
+        else:
+            case_ref = f"INV-{uuid.uuid4().hex[:10].upper()}"
 
     new_case = CaseModel(
         case_id=case_id,
@@ -106,11 +129,12 @@ async def upload_evidence(
     case_id: str,
     file: UploadFile = File(...),
     notes: Optional[str] = Form(None),
+    source_type: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
     """
-    Upload unlabelled evidence file to a case.
-    The investigator does NOT need to specify source domain.
+    Upload evidence file to a case.
+    Accepts optional source_type or auto-detects if omitted.
     The platform calculates SHA-256, encrypts via AES-256-GCM, stores to MinIO,
     detects source domain, normalizes, deduplicates, and produces data quality metrics.
     """
@@ -123,18 +147,27 @@ async def upload_evidence(
     temp_path = os.path.join(temp_dir, file.filename)
     try:
         content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty.")
         with open(temp_path, "wb") as f:
             f.write(content)
 
         # Process file through pipeline
         evidence_id = f"EV-{uuid.uuid4().hex[:8].upper()}"
-        result = await process_file(
-            file_path=temp_path,
-            domain=None,  # Automatic source detection
-            case_id=case_id,
-            evidence_id=evidence_id
-        )
-        return result
+        try:
+            result = await process_file(
+                file_path=temp_path,
+                domain=source_type,  # Use investigator source_type hint if provided
+                case_id=case_id,
+                evidence_id=evidence_id
+            )
+            return result
+        except ValueError as ve:
+            logger.error(f"Evidence processing validation error for {file.filename}: {ve}")
+            raise HTTPException(status_code=400, detail=str(ve))
+        except Exception as e:
+            logger.exception(f"Unhandled error processing evidence {file.filename}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to process evidence file: {str(e)}")
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
@@ -185,3 +218,105 @@ def verify_evidence_integrity(evidence_id: str, db: Session = Depends(get_db)):
         "verified": is_valid,
         "integrity_status": "VERIFIED_AUTHENTIC" if is_valid else "TAMPERED_OR_CORRUPT"
     }
+
+@router.delete("/{case_id}")
+def delete_case(case_id: str, db: Session = Depends(get_db)):
+    """Permanently deletes a case and all associated data across Postgres, Neo4j, MinIO, and Redis."""
+    case = db.query(CaseModel).filter_by(case_id=case_id).first()
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    # Delete PostgreSQL records
+    db.query(AnomalyFindingModel).filter(AnomalyFindingModel.case_id == case_id).delete()
+    db.query(AnomalyRunModel).filter(AnomalyRunModel.case_id == case_id).delete()
+    db.query(DetectionSignalModel).filter(DetectionSignalModel.case_id == case_id).delete()
+    db.query(GoldenProfileModel).filter(GoldenProfileModel.case_id == case_id).delete()
+    db.query(AuditLogModel).filter(AuditLogModel.case_id == case_id).delete()
+
+    ev_list = db.query(EvidenceModel).filter_by(case_id=case_id).all()
+    for ev in ev_list:
+        db.query(QuarantineRecordModel).filter_by(evidence_id=ev.evidence_id).delete()
+        db.query(DataQualityReportModel).filter_by(evidence_id=ev.evidence_id).delete()
+        db.delete(ev)
+
+    db.delete(case)
+    db.commit()
+
+    # Neo4j cleanup
+    try:
+        from app.core.neo4j_client import neo4j_client
+        if neo4j_client.ensure_connected():
+            with neo4j_client.driver.session() as session:
+                session.run("MATCH (n {case_id: $case_id}) DETACH DELETE n", case_id=case_id)
+                if db.query(CaseModel).count() == 0:
+                    session.run("MATCH (n) DETACH DELETE n")
+    except Exception as e:
+        logger.warning(f"Neo4j cleanup for {case_id} failed: {e}")
+
+    # MinIO cleanup
+    try:
+        from app.core.storage import storage_service
+        s3 = storage_service.s3_client
+        for b in ["raw-evidence", "iceberg-warehouse"]:
+            res = s3.list_objects_v2(Bucket=b, Prefix=f"{case_id}/")
+            for obj in res.get("Contents", []):
+                s3.delete_object(Bucket=b, Key=obj["Key"])
+            wh_res = s3.list_objects_v2(Bucket=b, Prefix=f"events/case_id={case_id}/")
+            for obj in wh_res.get("Contents", []):
+                s3.delete_object(Bucket=b, Key=obj["Key"])
+    except Exception as e:
+        logger.warning(f"MinIO cleanup for {case_id} failed: {e}")
+
+    # Redis cache flush
+    try:
+        import redis
+        from app.core.config import settings
+        r = redis.from_url(settings.REDIS_URL)
+        r.flushall()
+    except Exception as e:
+        logger.warning(f"Redis cleanup failed: {e}")
+
+    return {"status": "success", "message": f"Case {case_id} deleted successfully"}
+
+@router.delete("")
+def delete_all_cases(db: Session = Depends(get_db)):
+    """Wipes all cases and associated data across all databases for a clean slate."""
+    db.query(AnomalyFindingModel).delete()
+    db.query(AnomalyRunModel).delete()
+    db.query(DetectionSignalModel).delete()
+    db.query(GoldenProfileModel).delete()
+    db.query(QuarantineRecordModel).delete()
+    db.query(DataQualityReportModel).delete()
+    db.query(EvidenceModel).delete()
+    db.query(AuditLogModel).delete()
+    db.query(CaseModel).delete()
+    db.commit()
+
+    try:
+        from app.core.neo4j_client import neo4j_client
+        if neo4j_client.ensure_connected():
+            with neo4j_client.driver.session() as session:
+                session.run("MATCH (n) DETACH DELETE n")
+    except Exception as e:
+        logger.warning(f"Neo4j cleanup failed: {e}")
+
+    try:
+        from app.core.storage import storage_service
+        s3 = storage_service.s3_client
+        for b in ["raw-evidence", "iceberg-warehouse"]:
+            res = s3.list_objects_v2(Bucket=b)
+            for obj in res.get("Contents", []):
+                s3.delete_object(Bucket=b, Key=obj["Key"])
+    except Exception as e:
+        logger.warning(f"MinIO cleanup failed: {e}")
+
+    try:
+        import redis
+        from app.core.config import settings
+        r = redis.from_url(settings.REDIS_URL)
+        r.flushall()
+    except Exception as e:
+        logger.warning(f"Redis cleanup failed: {e}")
+
+    return {"status": "success", "message": "All cases and data purged successfully"}
+

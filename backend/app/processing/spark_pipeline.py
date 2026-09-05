@@ -48,6 +48,28 @@ CANONICAL_PYARROW_SCHEMA = pa.schema([
     ("provenance_json", pa.string())
 ])
 
+def _safe_float(val: Any) -> Optional[float]:
+    if val is None:
+        return None
+    try:
+        s = str(val).strip().replace(",", "")
+        if not s or s.lower() in ("nan", "none", "null", "undefined", ""):
+            return None
+        return float(s)
+    except (ValueError, TypeError):
+        return None
+
+def _safe_int(val: Any) -> Optional[int]:
+    if val is None:
+        return None
+    try:
+        s = str(val).strip().replace(",", "")
+        if not s or s.lower() in ("nan", "none", "null", "undefined", ""):
+            return None
+        return int(float(s))
+    except (ValueError, TypeError):
+        return None
+
 class SparkIcebergPipeline:
     """
     Distributed processing and Iceberg / Parquet warehouse pipeline.
@@ -65,28 +87,10 @@ class SparkIcebergPipeline:
         records = []
         for e in events:
             date_part = e.timestamp[:10] if e.timestamp else "1970-01-01"
-            
-            # Safe int parsing for nullable telemetry ports and durations
-            port = None
-            if e.telemetry.service_port is not None:
-                try:
-                    port = int(e.telemetry.service_port)
-                except Exception:
-                    pass
 
-            duration = None
-            if e.telemetry.duration_seconds is not None:
-                try:
-                    duration = int(e.telemetry.duration_seconds)
-                except Exception:
-                    pass
-
-            bytes_tf = None
-            if e.telemetry.bytes_transferred is not None:
-                try:
-                    bytes_tf = int(e.telemetry.bytes_transferred)
-                except Exception:
-                    pass
+            port = _safe_int(e.telemetry.service_port)
+            duration = _safe_int(e.telemetry.duration_seconds)
+            bytes_tf = _safe_int(e.telemetry.bytes_transferred)
 
             records.append({
                 "event_id": str(e.event_id or ""),
@@ -110,8 +114,8 @@ class SparkIcebergPipeline:
                 # Telemetry
                 "telemetry_imei": str(e.telemetry.imei or ""),
                 "telemetry_cell_tower_id": str(e.telemetry.cell_tower_id or ""),
-                "telemetry_lat": float(e.telemetry.lat) if e.telemetry.lat is not None else None,
-                "telemetry_lng": float(e.telemetry.lng) if e.telemetry.lng is not None else None,
+                "telemetry_lat": _safe_float(e.telemetry.lat),
+                "telemetry_lng": _safe_float(e.telemetry.lng),
                 "telemetry_address": str(e.telemetry.address or ""),
                 "telemetry_assigned_ip": str(e.telemetry.assigned_ip or ""),
                 "telemetry_destination_ip": str(e.telemetry.destination_ip or ""),
@@ -121,7 +125,7 @@ class SparkIcebergPipeline:
 
                 # Financial
                 "financial_account_number": str(e.financial.account_number or ""),
-                "financial_amount_inr": float(e.financial.amount_inr or 0.0),
+                "financial_amount_inr": _safe_float(e.financial.amount_inr) or 0.0,
                 "financial_txn_type": str(e.financial.txn_type or ""),
                 "financial_channel": str(e.financial.channel or ""),
                 "financial_counterparty": str(e.financial.counterparty or ""),

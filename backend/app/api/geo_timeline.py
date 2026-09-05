@@ -19,7 +19,17 @@ async def get_sync_data(case_id: str = None):
     Reads from the MinIO Parquet canonical warehouse.
     Zero MongoDB dependency.
     """
-    events = canonical_reader.read_all_events(case_id=case_id)
+    target_case_id = case_id
+    if not target_case_id:
+        from app.core.database import get_db_context
+        from app.models.postgres_models import CaseModel
+        with get_db_context() as db:
+            c = db.query(CaseModel).order_by(CaseModel.created_at.desc()).first()
+            if not c:
+                return {"timeline": [], "waypoints": []}
+            target_case_id = c.case_id
+
+    events = canonical_reader.read_all_events(case_id=target_case_id)
 
     timeline_data = []
     waypoint_data = {}

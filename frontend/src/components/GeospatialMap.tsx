@@ -6,6 +6,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { ScatterplotLayer } from '@deck.gl/layers';
 import { TripsLayer } from '@deck.gl/geo-layers';
 import { useTimelineStore } from '../store/useTimelineStore';
+import { useCase } from '../context/CaseContext';
 
 const INITIAL_VIEW_STATE = {
   longitude: 77.2090,
@@ -30,18 +31,23 @@ function getColorForCluster(cluster_id: string): [number, number, number] {
 }
 
 export default function GeospatialMap() {
+  const { activeCase } = useCase();
   const [waypoints, setWaypoints] = useState<any[]>([]);
   const { currentTime, timeRange } = useTimelineStore();
 
   useEffect(() => {
-    fetch('/api/geo/sync-data')
+    const url = activeCase?.case_id 
+      ? `/api/geo/sync-data?case_id=${encodeURIComponent(activeCase.case_id)}`
+      : '/api/geo/sync-data';
+    fetch(url)
       .then(res => res.json())
       .then(data => {
         if (data.waypoints) {
           setWaypoints(data.waypoints);
         }
-      });
-  }, []);
+      })
+      .catch(err => console.error("Geo sync error:", err));
+  }, [activeCase?.case_id]);
 
   const layers = useMemo(() => {
     const allPoints: any[] = [];

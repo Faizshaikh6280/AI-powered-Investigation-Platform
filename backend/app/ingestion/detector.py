@@ -25,29 +25,80 @@ class AutomaticSourceDetector:
     # Domain characteristic column/key sets
     SIGNATURES = {
         "TELECOM": {
-            "primary": {"calling_number", "called_number", "caller", "callee", "phone_number"},
-            "secondary": {"imei", "cell_tower_id", "duration_seconds", "call_type", "tower_lat", "tower_lng", "call_id"},
-            "weights": {"calling_number": 0.35, "called_number": 0.35, "imei": 0.15, "cell_tower_id": 0.15}
+            "primary": {
+                "calling_number", "called_number", "caller", "callee", "phone_number",
+                "caller_phone", "receiver_phone", "caller_number", "receiver_number",
+                "source_phone", "destination_phone", "a_party", "b_party", "calling", "called",
+                "phone", "mobile", "msisdn"
+            },
+            "secondary": {
+                "imei", "imsi", "cell_tower_id", "tower_id", "cell_id", "duration_seconds", "duration",
+                "call_duration", "call_type", "tower_lat", "tower_lng", "lat", "lng",
+                "call_id", "start_time", "end_time", "address", "tower_address", "device_id"
+            },
+            "weights": {
+                "calling_number": 0.35, "called_number": 0.35, "caller_phone": 0.35, "receiver_phone": 0.35,
+                "caller": 0.30, "callee": 0.30, "phone_number": 0.25, "imei": 0.20, "cell_tower_id": 0.20,
+                "tower_id": 0.20, "cell_id": 0.20
+            },
+            "filename_keywords": ["telecom", "cdr", "call", "cellular", "tower"]
         },
         "NETWORK": {
-            "primary": {"assigned_ip", "destination_ip", "client_ip", "dest_ip"},
-            "secondary": {"service_port", "bytes_transferred", "session_id", "duration_sec", "ipdr"},
-            "weights": {"assigned_ip": 0.40, "destination_ip": 0.40, "service_port": 0.10, "bytes_transferred": 0.10}
+            "primary": {
+                "assigned_ip", "destination_ip", "client_ip", "dest_ip", "src_ip", "dst_ip",
+                "ip_address", "source_ip"
+            },
+            "secondary": {
+                "service_port", "port", "destination_port", "src_port", "dst_port", "bytes_transferred", "bytes",
+                "octets", "session_id", "duration_sec", "duration_seconds", "duration", "ipdr", "protocol",
+                "subscriber_id", "cell_id"
+            },
+            "weights": {
+                "assigned_ip": 0.40, "destination_ip": 0.40, "client_ip": 0.35, "dest_ip": 0.35,
+                "src_ip": 0.35, "dst_ip": 0.35, "service_port": 0.15, "destination_port": 0.15, "bytes_transferred": 0.15
+            },
+            "filename_keywords": ["network", "ipdr", "pcap", "traffic", "flow", "session"]
         },
         "BANKING": {
-            "primary": {"account_number", "account_holder_name", "amount_inr", "amount"},
-            "secondary": {"txn_type", "txn_id", "counterparty_identifier", "channel", "narration", "balance", "credit", "debit"},
-            "weights": {"account_number": 0.35, "amount_inr": 0.35, "txn_type": 0.15, "counterparty_identifier": 0.15}
+            "primary": {
+                "account_number", "account_no", "acc_no", "account", "account_holder_name",
+                "amount_inr", "amount", "transaction_amount", "debit", "credit", "sender", "receiver"
+            },
+            "secondary": {
+                "txn_type", "txn_id", "transaction_type", "transaction_time", "counterparty_identifier",
+                "counterparty", "to_account", "channel", "narration", "balance", "credit_amount",
+                "debit_amount", "cheque", "upi", "atm_id", "device_imei"
+            },
+            "weights": {
+                "account_number": 0.35, "account_no": 0.35, "acc_no": 0.35, "account": 0.30,
+                "amount_inr": 0.35, "amount": 0.30, "transaction_amount": 0.35, "txn_type": 0.15,
+                "sender": 0.15, "receiver": 0.15, "counterparty_identifier": 0.15
+            },
+            "filename_keywords": ["bank", "statement", "txn", "transaction", "financial", "ledger", "upi"]
         },
         "SOCIAL": {
-            "primary": {"user_handle", "platform", "registered_phone"},
-            "secondary": {"client_ip", "device_id", "action", "log_id", "story_post", "send_msg"},
-            "weights": {"user_handle": 0.40, "platform": 0.30, "registered_phone": 0.30}
+            "primary": {
+                "user_handle", "handle", "platform", "registered_phone", "social_handle", "username"
+            },
+            "secondary": {
+                "client_ip", "device_id", "action", "log_id", "story_post", "send_msg", "chat_id"
+            },
+            "weights": {
+                "user_handle": 0.40, "handle": 0.35, "platform": 0.30, "registered_phone": 0.30, "social_handle": 0.35
+            },
+            "filename_keywords": ["social", "telegram", "whatsapp", "chat", "msg", "instagram", "twitter"]
         },
         "KYC": {
-            "primary": {"national_id", "full_name", "aadhar", "ssn", "passport"},
-            "secondary": {"occupation", "address", "phone", "email", "record_id", "data_source"},
-            "weights": {"national_id": 0.40, "full_name": 0.30, "address": 0.15, "occupation": 0.15}
+            "primary": {
+                "national_id", "full_name", "aadhar", "ssn", "passport", "pan", "voter_id", "identity_number"
+            },
+            "secondary": {
+                "occupation", "address", "phone", "email", "record_id", "data_source", "dob", "gender"
+            },
+            "weights": {
+                "national_id": 0.40, "aadhar": 0.40, "pan": 0.40, "full_name": 0.30, "address": 0.15, "occupation": 0.15
+            },
+            "filename_keywords": ["kyc", "profile", "entity", "person", "identity", "customer", "registry"]
         }
     }
 
@@ -132,6 +183,18 @@ class AutomaticSourceDetector:
         reasons_map: Dict[str, List[str]] = {}
 
         header_set = set(headers)
+        fn_lower = filename.lower()
+
+        # Direct Geospatial / GPS Movement telemetry detection
+        if any(kw in fn_lower for kw in ("geo", "spatial", "gps", "tracking", "waypoint")) or (
+            {"latitude", "longitude"}.issubset(header_set) and not {"caller", "calling_number", "calling", "caller_phone"}.intersection(header_set)
+        ):
+            return SourceDetectionResult(
+                detected_type="GENERAL",
+                confidence=0.95,
+                reasons=["Matched geospatial trajectory coordinates (latitude/longitude)"],
+                matched_signatures=["latitude", "longitude"]
+            )
 
         for domain, sig in self.SIGNATURES.items():
             domain_score = 0.0
@@ -151,6 +214,14 @@ class AutomaticSourceDetector:
                     domain_score += 0.10
                     matches.append(col)
                     reasons.append(f"Matched supporting column '{col}'")
+
+            # Filename heuristic boost
+            for kw in sig.get("filename_keywords", []):
+                if kw in fn_lower:
+                    domain_score += 0.40
+                    matches.append(f"filename_keyword:{kw}")
+                    reasons.append(f"Filename matches keyword '{kw}'")
+                    break
 
             # Check PDF text if applicable
             if pdf_text:
@@ -172,9 +243,26 @@ class AutomaticSourceDetector:
         best_score = 0.0
         sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
 
-        if sorted_scores and sorted_scores[0][1] >= 0.35:
+        if sorted_scores and sorted_scores[0][1] >= 0.25:
             best_domain = sorted_scores[0][0]
             best_score = sorted_scores[0][1]
+        elif headers:
+            # Fallback heuristic based on generic common column presence
+            if any("phone" in h or "caller" in h or "call" in h or "tower" in h for h in header_set):
+                best_domain = "TELECOM"
+                best_score = 0.50
+            elif any("account" in h or "amt" in h or "amount" in h or "txn" in h or "balance" in h for h in header_set):
+                best_domain = "BANKING"
+                best_score = 0.50
+            elif any("ip" in h or "port" in h or "byte" in h for h in header_set):
+                best_domain = "NETWORK"
+                best_score = 0.50
+            elif any("name" in h or "aadhar" in h or "pan" in h or "address" in h for h in header_set):
+                best_domain = "KYC"
+                best_score = 0.50
+            else:
+                best_domain = "GENERAL"
+                best_score = 0.30
 
         # Check for ambiguity (e.g. top two scores close)
         is_ambiguous = False
@@ -182,12 +270,12 @@ class AutomaticSourceDetector:
             if (sorted_scores[0][1] - sorted_scores[1][1]) < 0.15:
                 is_ambiguous = True
 
-        needs_review = (best_score < 0.60) or is_ambiguous or (best_domain == "UNKNOWN")
+        needs_review = (best_score < 0.60) or is_ambiguous or (best_domain in ("UNKNOWN", "GENERAL"))
 
         return SourceDetectionResult(
             detected_type=best_domain,
             confidence=round(best_score, 2),
-            reasons=reasons_map.get(best_domain, [f"Insufficient signatures detected in {filename}"]),
+            reasons=reasons_map.get(best_domain, [f"Detected domain {best_domain} for {filename}"]),
             matched_signatures=matched_sigs.get(best_domain, []),
             ambiguity_state=is_ambiguous,
             needs_review=needs_review

@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { 
   FolderOpen, Plus, Calendar, User, CheckCircle, ShieldCheck, 
-  ArrowRight, FileSpreadsheet, AlertTriangle, Database
+  ArrowRight, FileSpreadsheet, AlertTriangle, Database, Trash2, Loader2
 } from 'lucide-react';
 import { useCase } from '../context/CaseContext';
 import CreateCaseModal from './CreateCaseModal';
@@ -14,8 +14,39 @@ interface CaseManagementViewProps {
 }
 
 export default function CaseManagementView({ onSelectCaseTab }: CaseManagementViewProps) {
-  const { cases, activeCase, setActiveCaseId, isLoading, refreshCases } = useCase();
+  const { cases, activeCase, setActiveCaseId, isLoading, refreshCases, deleteCase, deleteAllCases } = useCase();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
+
+  const handleDeleteCase = async (e: React.MouseEvent, caseId: string, caseTitle: string) => {
+    e.stopPropagation();
+    if (!window.confirm(`Are you sure you want to permanently delete case "${caseTitle}"? All associated evidence, golden profiles, and graph data will be purged.`)) {
+      return;
+    }
+    setDeletingId(caseId);
+    try {
+      await deleteCase(caseId);
+    } catch (err: any) {
+      alert(`Failed to delete case: ${err.message}`);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleDeleteAll = async () => {
+    if (!window.confirm('WARNING: Are you sure you want to delete ALL cases? This will completely wipe all evidence, entities, graph nodes, and anomalies for a completely fresh start.')) {
+      return;
+    }
+    setIsDeletingAll(true);
+    try {
+      await deleteAllCases();
+    } catch (err: any) {
+      alert(`Failed to delete all cases: ${err.message}`);
+    } finally {
+      setIsDeletingAll(false);
+    }
+  };
 
   return (
     <div className="flex flex-col h-full bg-background p-6 md:p-8 max-w-7xl mx-auto w-full overflow-y-auto">
@@ -29,12 +60,25 @@ export default function CaseManagementView({ onSelectCaseTab }: CaseManagementVi
             Registered investigative operations, attached evidence files, and active workspaces
           </p>
         </div>
-        <button
-          onClick={() => setIsCreateOpen(true)}
-          className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-sm"
-        >
-          <Plus className="w-4 h-4" /> New Case Dossier
-        </button>
+        <div className="flex items-center gap-3">
+          {cases.length > 0 && (
+            <button
+              onClick={handleDeleteAll}
+              disabled={isDeletingAll}
+              className="px-3.5 py-2 bg-destructive/10 text-destructive border border-destructive/20 text-sm font-medium rounded-lg hover:bg-destructive/20 transition-colors flex items-center gap-2 disabled:opacity-50"
+              title="Delete all cases and start with a clean slate"
+            >
+              {isDeletingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+              Delete All Cases
+            </button>
+          )}
+          <button
+            onClick={() => setIsCreateOpen(true)}
+            className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-sm"
+          >
+            <Plus className="w-4 h-4" /> New Case Dossier
+          </button>
+        </div>
       </div>
 
       {isLoading && cases.length === 0 ? (
@@ -73,14 +117,28 @@ export default function CaseManagementView({ onSelectCaseTab }: CaseManagementVi
                     <span className="text-xs font-mono font-bold text-primary bg-primary/10 px-2.5 py-1 rounded border border-primary/20">
                       {c.case_reference}
                     </span>
-                    <span className={cn(
-                      "text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border",
-                      c.status === 'ACTIVE' 
-                        ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" 
-                        : "bg-secondary text-muted-foreground border-border"
-                    )}>
-                      {c.status}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className={cn(
+                        "text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border",
+                        c.status === 'ACTIVE' 
+                          ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" 
+                          : "bg-secondary text-muted-foreground border-border"
+                      )}>
+                        {c.status}
+                      </span>
+                      <button
+                        onClick={(e) => handleDeleteCase(e, c.case_id, c.title)}
+                        disabled={deletingId === c.case_id}
+                        className="p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded transition-colors"
+                        title="Delete Case Dossier"
+                      >
+                        {deletingId === c.case_id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    </div>
                   </div>
 
                   <h3 className="text-lg font-bold text-foreground mb-2 group-hover:text-primary transition-colors">

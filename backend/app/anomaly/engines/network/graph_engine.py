@@ -176,8 +176,8 @@ class NetworkGraphAnomalyEngine(BaseDetector):
         p90_betweenness = float(sorted(all_betweenness)[int(len(all_betweenness)*0.85)]) if all_betweenness else 0.0
 
         signals = []
-        is_bridge = betweenness > 0.10 and betweenness >= p90_betweenness
-        is_hub = degree >= 4
+        is_bridge = betweenness >= 0.35 and len(G.nodes) >= 15 and betweenness >= p90_betweenness
+        is_hub = degree >= 4 and len(G.nodes) >= 15
 
         score = 0.0
         if is_bridge:

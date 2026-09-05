@@ -3,7 +3,7 @@
  * Purely backend-driven: Zero mock data.
  */
 
-const API_BASE = '';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 
 export interface Case {
   case_id: string;
@@ -122,18 +122,106 @@ export interface AnomalyFinding {
   entityId: string;
   entityType: string;
   type: string;
+  category?: string;
+  patternType?: string;
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
   score: number;
   confidence?: number;
   investigativePriority?: string;
+  caseRelevance?: string;
+  relevanceReasons?: string[];
   domain?: string;
   title?: string;
+  whatHappened?: string;
+  whyUnusual?: string;
+  whyRelevant?: string;
   status: string;
   reasons: string[];
   contributingDetectors?: string[];
+  detectors?: string[];
+  detectorSummary?: Array<{
+    detector_id: string;
+    name: string;
+    domain: string;
+    score: number;
+    confidence: number;
+    status: string;
+    observations: Record<string, any>;
+  }>;
+  primaryEntities?: Array<{
+    entity_id: string;
+    display_name: string;
+    entity_type: string;
+    risk_score?: number;
+    aliases?: string[];
+    phones?: string[];
+    accounts?: string[];
+  }>;
+  relatedEntities?: Array<{
+    entity_id: string;
+    display_name: string;
+    entity_type: string;
+  }>;
+  supportingObservations?: string[];
+  supportingSignals?: Array<any>;
+  supportingEvents?: Array<{
+    event_id: string;
+    timestamp: string;
+    relative_time?: string;
+    domain: string;
+    event_type: string;
+    amount_inr?: number;
+    channel?: string;
+    counterparty?: string;
+    location?: string;
+    ip?: string;
+    evidence_id?: string;
+    source_file?: string;
+  }>;
+  timelineContext?: {
+    start_time?: string;
+    end_time?: string;
+    total_events_in_sequence?: number;
+    sequence_steps?: Array<{
+      step_index: number;
+      timestamp: string;
+      time_offset: string;
+      domain: string;
+      description: string;
+      event_id?: string;
+    }>;
+  };
+  graphContext?: {
+    focused_entity?: string;
+    structural_role?: string;
+    role_description?: string;
+    degree?: number;
+    betweenness_centrality?: number;
+    pagerank?: number;
+    community_id?: number;
+    subgraph_entities?: string[];
+    suggested_actions?: string[];
+  };
+  spatialContext?: {
+    available: boolean;
+    waypoints?: Array<{
+      name: string;
+      lat: number;
+      lng: number;
+      timestamp?: string;
+      type: string;
+    }>;
+    distance_km?: number;
+    implied_speed_kmh?: number;
+    elapsed_seconds?: number;
+    movement_description?: string;
+    reason?: string;
+  };
   metrics: Record<string, any>;
+  technicalDetails?: Record<string, any>;
   evidence_refs?: string[];
   canonical_event_refs?: string[];
+  evidenceQuality?: string;
   detectedAt?: string;
 }
 
@@ -144,6 +232,7 @@ export interface AnomalyRunResult {
   summary: {
     total_entities_analyzed: number;
     total_findings: number;
+    total_signals_generated?: number;
     critical_count: number;
     high_count: number;
     medium_count: number;
@@ -169,6 +258,13 @@ async function handleResponse<T>(res: Response): Promise<T> {
 }
 
 export const apiClient = {
+  // === GENERIC REQUEST ===
+  async request(endpoint: string, options?: RequestInit): Promise<any> {
+    const url = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`;
+    const res = await fetch(url, options);
+    return handleResponse<any>(res);
+  },
+
   // === CASES & EVIDENCE ===
   async listCases(): Promise<Case[]> {
     const res = await fetch(`${API_BASE}/api/cases`);
@@ -189,6 +285,20 @@ export const apiClient = {
     return handleResponse<Case>(res);
   },
 
+  async deleteCase(caseId: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}`, {
+      method: 'DELETE',
+    });
+    return handleResponse<any>(res);
+  },
+
+  async deleteAllCases(): Promise<any> {
+    const res = await fetch(`${API_BASE}/api/cases`, {
+      method: 'DELETE',
+    });
+    return handleResponse<any>(res);
+  },
+
   async uploadEvidenceFile(caseId: string, file: File, notes?: string): Promise<any> {
     const formData = new FormData();
     formData.append('file', file);
@@ -202,8 +312,11 @@ export const apiClient = {
   },
 
   // === INGESTION & PIPELINE ===
-  async triggerAllIngestion(): Promise<any> {
-    const res = await fetch(`${API_BASE}/api/ingest/trigger_all`, {
+  async triggerAllIngestion(caseId?: string): Promise<any> {
+    const url = caseId
+      ? `${API_BASE}/api/ingest/trigger_all?case_id=${encodeURIComponent(caseId)}`
+      : `${API_BASE}/api/ingest/trigger_all`;
+    const res = await fetch(url, {
       method: 'POST',
     });
     return handleResponse<any>(res);
@@ -218,34 +331,49 @@ export const apiClient = {
   },
 
   // === ENTITY RESOLUTION ===
-  async executeZinggER(): Promise<any> {
-    const res = await fetch(`${API_BASE}/api/zingg/execute`, {
+  async executeZinggER(caseId?: string): Promise<any> {
+    const url = caseId 
+      ? `${API_BASE}/api/zingg/execute?case_id=${encodeURIComponent(caseId)}`
+      : `${API_BASE}/api/zingg/execute`;
+    const res = await fetch(url, {
       method: 'POST',
     });
     return handleResponse<any>(res);
   },
 
-  async getGoldenProfiles(): Promise<GoldenProfile[]> {
-    const res = await fetch(`${API_BASE}/api/system/golden_profiles`);
+  async getGoldenProfiles(caseId?: string): Promise<GoldenProfile[]> {
+    const url = caseId 
+      ? `${API_BASE}/api/system/golden_profiles?case_id=${encodeURIComponent(caseId)}`
+      : `${API_BASE}/api/system/golden_profiles`;
+    const res = await fetch(url);
     return handleResponse<GoldenProfile[]>(res);
   },
 
   // === GRAPH TOPOLOGY ===
-  async syncGraph(): Promise<any> {
-    const res = await fetch(`${API_BASE}/api/graph/sync`, {
+  async syncGraph(caseId?: string): Promise<any> {
+    const url = caseId 
+      ? `${API_BASE}/api/graph/sync?case_id=${encodeURIComponent(caseId)}`
+      : `${API_BASE}/api/graph/sync`;
+    const res = await fetch(url, {
       method: 'POST',
     });
     return handleResponse<any>(res);
   },
 
-  async getGraphTopology(): Promise<GraphTopology> {
-    const res = await fetch(`${API_BASE}/api/graph/topology`);
+  async getGraphTopology(caseId?: string): Promise<GraphTopology> {
+    const url = caseId 
+      ? `${API_BASE}/api/graph/topology?case_id=${encodeURIComponent(caseId)}`
+      : `${API_BASE}/api/graph/topology`;
+    const res = await fetch(url);
     return handleResponse<GraphTopology>(res);
   },
 
   // === TIMELINE & GEOSPATIAL ===
-  async getGeoSyncData(): Promise<GeoSyncData> {
-    const res = await fetch(`${API_BASE}/api/geo/sync-data`);
+  async getGeoSyncData(caseId?: string): Promise<GeoSyncData> {
+    const url = caseId 
+      ? `${API_BASE}/api/geo/sync-data?case_id=${encodeURIComponent(caseId)}`
+      : `${API_BASE}/api/geo/sync-data`;
+    const res = await fetch(url);
     return handleResponse<GeoSyncData>(res);
   },
 
@@ -255,8 +383,11 @@ export const apiClient = {
     return handleResponse<DetectorHealthResponse>(res);
   },
 
-  async getAnomalyStats(): Promise<AnomalyStats> {
-    const res = await fetch(`${API_BASE}/api/anomalies/stats`);
+  async getAnomalyStats(caseId?: string): Promise<AnomalyStats> {
+    const url = caseId 
+      ? `${API_BASE}/api/anomalies/stats?case_id=${encodeURIComponent(caseId)}`
+      : `${API_BASE}/api/anomalies/stats`;
+    const res = await fetch(url);
     return handleResponse<AnomalyStats>(res);
   },
 
@@ -282,6 +413,36 @@ export const apiClient = {
       : `${API_BASE}/api/anomalies/analyze?sync=true`;
     const res = await fetch(url, { method: 'POST' });
     return handleResponse<{ message: string; result: AnomalyRunResult }>(res);
+  },
+
+  async getCaseSummary(caseId: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/api/anomalies/cases/${encodeURIComponent(caseId)}/summary`);
+    return handleResponse<any>(res);
+  },
+
+  async getCaseSignals(caseId: string, limit: number = 200): Promise<{ case_id: string; total_signals: number; signals: any[] }> {
+    const res = await fetch(`${API_BASE}/api/anomalies/cases/${encodeURIComponent(caseId)}/signals?limit=${limit}`);
+    return handleResponse<{ case_id: string; total_signals: number; signals: any[] }>(res);
+  },
+
+  async getFindingEvidence(findingId: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/api/anomalies/findings/${encodeURIComponent(findingId)}/evidence`);
+    return handleResponse<any>(res);
+  },
+
+  async getFindingTimeline(findingId: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/api/anomalies/findings/${encodeURIComponent(findingId)}/timeline`);
+    return handleResponse<any>(res);
+  },
+
+  async getFindingGraphContext(findingId: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/api/anomalies/findings/${encodeURIComponent(findingId)}/graph-context`);
+    return handleResponse<any>(res);
+  },
+
+  async getFindingSpatialContext(findingId: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/api/anomalies/findings/${encodeURIComponent(findingId)}/spatial-context`);
+    return handleResponse<any>(res);
   },
 
   // === SYSTEM RESET ===

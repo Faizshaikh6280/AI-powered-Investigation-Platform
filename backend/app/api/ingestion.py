@@ -2,6 +2,7 @@ import os
 import glob
 import logging
 import traceback
+from typing import Optional, List, Dict, Any
 from fastapi import APIRouter
 from app.services.ingestion_service import process_file
 from app.core.database import get_db_context
@@ -14,48 +15,44 @@ router = APIRouter()
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "..", "data_files")
 
 @router.post("/trigger_all")
-async def ingest_all_files():
+async def ingest_all_files(case_id: Optional[str] = None):
     """
-    Ingests all sample evidence files through the new distributed pipeline.
-    Maintains full backward compatibility with existing platform clients.
+    Seeds sample evidence files if explicitly requested, scoped to the specified or active case.
+    Does NOT wipe the warehouse.
     """
+    target_case_id = case_id
+    if not target_case_id:
+        with get_db_context() as db:
+            existing_case = db.query(CaseModel).order_by(CaseModel.created_at.desc()).first()
+            if existing_case:
+                target_case_id = existing_case.case_id
+            else:
+                target_case_id = "CASE-DEFAULT-001"
+                case = CaseModel(
+                    case_id=target_case_id,
+                    case_reference="INV-2026-0142",
+                    title="Operation Shadow Syndicate",
+                    description="Cross-domain investigation in Delhi NCR.",
+                    created_by="SYSTEM"
+                )
+                db.add(case)
+
     files_to_ingest = [
         "bank_statements.csv",
         "cdr_records.csv",
         "ipdr_sessions.csv",
-        "social_media_logs.csv",
-        "raw_entities_profiles.csv"
+        "social_media_logs.csv"
     ]
-
-    # Resolve active or default case in PostgreSQL
-    case_id = "CASE-DEFAULT-001"
-    with get_db_context() as db:
-        existing_case = db.query(CaseModel).order_by(CaseModel.created_at.desc()).first()
-        if existing_case:
-            case_id = existing_case.case_id
-        else:
-            case = CaseModel(
-                case_id=case_id,
-                case_reference="INV-2026-0142",
-                title="Operation Shadow Syndicate",
-                description="Cross-domain kidnapping & extortion investigation in Delhi NCR.",
-                created_by="SYSTEM"
-            )
-            db.add(case)
-
-    # Clear warehouse for a clean baseline run
-    canonical_reader.clear_warehouse()
 
     results = []
     for filename in files_to_ingest:
         filepath = os.path.join(DATA_DIR, filename)
         if os.path.exists(filepath):
             try:
-                # Automatic source detection classifies each file
                 res = await process_file(
                     file_path=filepath,
                     domain=None,
-                    case_id=case_id
+                    case_id=target_case_id
                 )
                 results.append({
                     "status": "success",
@@ -72,9 +69,15 @@ async def ingest_all_files():
     return {"message": "Ingestion complete via new distributed pipeline", "results": results}
 
 @router.get("/events")
-async def get_events(limit: int = 200):
+async def get_events(case_id: Optional[str] = None, limit: int = 200):
     """
-    Retrieves canonical events from the MinIO Parquet warehouse.
-    Replaces MongoDB find query with zero breaking API contract changes.
+    Retrieves canonical events from the MinIO Parquet warehouse scoped to case_id.
     """
-    return canonical_reader.read_all_events(limit=limit)
+    target_case_id = case_id
+    if not target_case_id:
+        with get_db_context() as db:
+            c = db.query(CaseModel).order_by(CaseModel.created_at.desc()).first()
+            if not c:
+                return []
+            target_case_id = c.case_id
+    return canonical_reader.read_all_events(case_id=target_case_id, limit=limit)

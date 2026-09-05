@@ -12,6 +12,8 @@ interface CaseContextType {
   setActiveCaseId: (id: string) => void;
   refreshCases: () => Promise<void>;
   createCase: (payload: CaseCreatePayload) => Promise<Case>;
+  deleteCase: (id: string) => Promise<void>;
+  deleteAllCases: () => Promise<void>;
 }
 
 const CaseContext = createContext<CaseContextType | undefined>(undefined);
@@ -72,6 +74,16 @@ export function CaseProvider({ children }: { children: ReactNode }) {
     return newCase;
   }, [fetchCases]);
 
+  const deleteCase = useCallback(async (id: string): Promise<void> => {
+    await apiClient.deleteCase(id);
+    await fetchCases();
+  }, [fetchCases]);
+
+  const deleteAllCases = useCallback(async (): Promise<void> => {
+    await apiClient.deleteAllCases();
+    await fetchCases();
+  }, [fetchCases]);
+
   const activeCase = cases.find(c => c.case_id === activeCaseId) || null;
 
   return (
@@ -85,6 +97,8 @@ export function CaseProvider({ children }: { children: ReactNode }) {
         setActiveCaseId,
         refreshCases: fetchCases,
         createCase,
+        deleteCase,
+        deleteAllCases,
       }}
     >
       {children}

@@ -4,13 +4,18 @@ import {
   Filter, Calendar, Search, ArrowRight, Clock, Settings2
 } from 'lucide-react';
 import { cn } from '../utils/cn';
+import { useCase } from '../context/CaseContext';
 
 export default function TimelineFootprint() {
+  const { activeCase } = useCase();
   const [filterOpen, setFilterOpen] = useState(false);
   const [events, setEvents] = useState<any[]>([]);
 
   useEffect(() => {
-    fetch('/api/geo/sync-data')
+    const url = activeCase?.case_id 
+      ? `/api/geo/sync-data?case_id=${encodeURIComponent(activeCase.case_id)}`
+      : '/api/geo/sync-data';
+    fetch(url)
       .then(r => r.json())
       .then(data => {
         if (data.timeline && data.timeline.length > 0) {
@@ -46,7 +51,7 @@ export default function TimelineFootprint() {
       .catch(() => {
         setEvents([]);
       });
-  }, []);
+  }, [activeCase?.case_id]);
 
   return (
     <div className="flex flex-col h-full bg-background relative">

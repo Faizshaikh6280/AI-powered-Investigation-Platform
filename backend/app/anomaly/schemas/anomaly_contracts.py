@@ -15,6 +15,7 @@ class DetectorType(str, Enum):
     CROSS_DOMAIN = "CROSS_DOMAIN"
     IDENTITY_DISCREPANCY = "IDENTITY_DISCREPANCY"
     ADVANCED_ML = "ADVANCED_ML"
+    COMMUNICATION = "COMMUNICATION"
 
 class SeverityLevel(str, Enum):
     LOW = "LOW"

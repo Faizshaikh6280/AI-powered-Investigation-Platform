@@ -67,10 +67,12 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: cyber_investigation_backend
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
     environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
       - DATABASE_URL=postgresql://postgres:postgres123@postgres:5432/investigation_db
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=minioadmin
@@ -105,6 +107,8 @@ services:
     container_name: cyber_celery_worker
     command: celery -A app.core.celery_app worker --loglevel=info --pool=solo
     environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
       - DATABASE_URL=postgresql://postgres:postgres123@postgres:5432/investigation_db
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=minioadmin
@@ -169,10 +173,11 @@ services:
       - "7687:7687"
     environment:
       - NEO4J_AUTH=neo4j/password123
-      - NEO4J_PLUGINS=["apoc", "graph-data-science"]
-      - NEO4J_dbms_security_procedures_unrestricted=apoc.*,gds.*
+      - 'NEO4J_PLUGINS=["apoc", "graph-data-science"]'
+      - 'NEO4J_dbms_security_procedures_unrestricted=apoc.*,gds.*'
     volumes:
       - neo4j_data:/data
+      - neo4j_plugins:/plugins
     restart: always
 
   redis:
@@ -187,3 +192,4 @@ volumes:
   minio_data:
   mongo_data:
   neo4j_data:
+  neo4j_plugins:

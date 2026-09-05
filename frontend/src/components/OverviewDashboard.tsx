@@ -31,10 +31,10 @@ export default function OverviewDashboard({ onNavigateTab }: OverviewDashboardPr
     setIsLoading(true);
     try {
       const [profiles, graph, aStats, geoData] = await Promise.all([
-        apiClient.getGoldenProfiles().catch(() => []),
-        apiClient.getGraphTopology().catch(() => ({ nodes: [], edges: [] })),
-        apiClient.getAnomalyStats().catch(() => ({ total: 0, critical: 0, high: 0, medium: 0, low: 0 })),
-        apiClient.getGeoSyncData().catch(() => ({ timeline: [], waypoints: [] }))
+        apiClient.getGoldenProfiles(activeCase?.case_id).catch(() => []),
+        apiClient.getGraphTopology(activeCase?.case_id).catch(() => ({ nodes: [], edges: [] })),
+        apiClient.getAnomalyStats(activeCase?.case_id).catch(() => ({ total: 0, critical: 0, high: 0, medium: 0, low: 0 })),
+        apiClient.getGeoSyncData(activeCase?.case_id).catch(() => ({ timeline: [], waypoints: [] }))
       ]);
 
       setStats({

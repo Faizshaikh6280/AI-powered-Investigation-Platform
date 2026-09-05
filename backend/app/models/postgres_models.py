@@ -109,6 +109,7 @@ class GoldenProfileModel(Base):
     """
     __tablename__ = "golden_profiles"
 
+    case_id = Column(String(64), primary_key=True, index=True, default="CASE-DEFAULT-001")
     z_cluster_id = Column(String(64), primary_key=True, index=True)  # e.g., "CLUSTER_001"
     primary_name = Column(String(255), nullable=False, index=True)
     known_aliases = Column(JSON, default=list, nullable=False)       # List of alias strings
@@ -136,11 +137,49 @@ class AuditLogModel(Base):
     timestamp = Column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
+class DetectionSignalModel(Base):
+    """
+    Standard machine-generated detection signal table.
+    Stores raw observations from all 11+ analytical engines prior to correlation and synthesis.
+    """
+    __tablename__ = "detection_signals"
+
+    signal_id = Column(String(64), primary_key=True, index=True)
+    case_id = Column(String(64), ForeignKey("cases.case_id", ondelete="CASCADE"), nullable=False, index=True)
+    detector_id = Column(String(64), nullable=False, index=True)
+    detector_version = Column(String(32), default="v1.0.0", nullable=False)
+
+    pattern_type = Column(String(64), default="GENERAL", index=True, nullable=False)
+    signal_type = Column(String(128), default="ANOMALY_OBSERVATION", nullable=False)
+    domain = Column(String(64), default="CROSS_DOMAIN", index=True, nullable=False)
+
+    entity_refs = Column(JSON, default=list, nullable=False)
+    event_refs = Column(JSON, default=list, nullable=False)
+    evidence_refs = Column(JSON, default=list, nullable=False)
+
+    timestamp_start = Column(DateTime(timezone=True), nullable=True)
+    timestamp_end = Column(DateTime(timezone=True), nullable=True)
+    location_refs = Column(JSON, default=list, nullable=False)
+
+    observations = Column(JSON, default=dict, nullable=False)
+    baseline = Column(JSON, default=dict, nullable=False)
+    metrics = Column(JSON, default=dict, nullable=False)
+
+    raw_score = Column(Float, default=0.0, nullable=False)
+    normalized_score = Column(Float, default=0.0, nullable=False)
+    detector_confidence = Column(Float, default=1.0, nullable=False)
+
+    graph_refs = Column(JSON, default=list, nullable=False)
+    provenance = Column(JSON, default=dict, nullable=False)
+    status = Column(String(32), default="DETECTED", index=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
 class AnomalyFindingModel(Base):
     """
-    Unified multi-engine anomaly finding registry.
+    Unified multi-engine anomaly and investigative finding registry.
     Combines behavioral, statistical, deterministic rules, network topology,
-    spatio-temporal, financial, social, and cross-domain anomaly findings.
+    spatio-temporal, financial, social, and cross-domain investigative findings.
     """
     __tablename__ = "anomaly_findings"
 
@@ -169,8 +208,42 @@ class AnomalyFindingModel(Base):
     graph_refs = Column(JSON, default=list, nullable=False)
     model_metadata = Column(JSON, default=dict, nullable=False)
 
+    # Rich Investigative Finding Fields
+    category = Column(String(64), default="GENERAL", index=True, nullable=True)
+    pattern_type = Column(String(64), nullable=True, index=True)
+    what_happened = Column(Text, nullable=True)
+    why_unusual = Column(Text, nullable=True)
+    why_relevant = Column(Text, nullable=True)
+
+    primary_entities = Column(JSON, default=list, nullable=False)
+    related_entities = Column(JSON, default=list, nullable=False)
+    time_range = Column(JSON, default=dict, nullable=False)
+    locations = Column(JSON, default=list, nullable=False)
+
+    supporting_observations = Column(JSON, default=list, nullable=False)
+    supporting_signals = Column(JSON, default=list, nullable=False)
+    supporting_events = Column(JSON, default=list, nullable=False)
+
+    graph_context = Column(JSON, default=dict, nullable=False)
+    timeline_context = Column(JSON, default=dict, nullable=False)
+    spatial_context = Column(JSON, default=dict, nullable=False)
+
+    detectors = Column(JSON, default=list, nullable=False)
+    detector_summary = Column(JSON, default=list, nullable=False)
+
+    evidence_quality = Column(String(32), default="HIGH", nullable=False)
+    case_relevance = Column(String(32), default="HIGH", index=True, nullable=False)
+    relevance_reasons = Column(JSON, default=list, nullable=False)
+    technical_details = Column(JSON, default=dict, nullable=False)
+    provenance = Column(JSON, default=dict, nullable=False)
+
     status = Column(String(32), default="DETECTED", index=True, nullable=False)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+
+# Backward and forward compatibility aliases
+InvestigativeFindingModel = AnomalyFindingModel
 
 
 class AnomalyRunModel(Base):

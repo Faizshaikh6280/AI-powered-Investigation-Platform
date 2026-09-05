@@ -8,7 +8,7 @@ from app.core.database import get_db_context
 from app.models.postgres_models import (
     CaseModel, EvidenceModel, QuarantineRecordModel,
     DataQualityReportModel, GoldenProfileModel, AuditLogModel,
-    AnomalyFindingModel, AnomalyRunModel
+    AnomalyFindingModel, AnomalyRunModel, DetectionSignalModel
 )
 from app.processing.canonical_reader import canonical_reader
 from app.core.storage import storage_service
@@ -25,6 +25,7 @@ async def clear_and_reset():
 
     # 2. Clear PostgreSQL Tables
     with get_db_context() as db:
+        db.query(DetectionSignalModel).delete()
         db.query(AnomalyFindingModel).delete()
         db.query(AnomalyRunModel).delete()
         db.query(QuarantineRecordModel).delete()
@@ -52,4 +53,13 @@ async def clear_and_reset():
     except Exception as e:
         logger.warning(f"[Reset] Error clearing raw evidence bucket: {e}")
 
-    return {"status": "cleared", "message": "Neo4j, PostgreSQL, and MinIO warehouse cleared successfully."}
+    # 5. Flush Redis Caches and Queues
+    try:
+        import redis
+        r = redis.from_url(settings.REDIS_URI)
+        r.flushall()
+        logger.info("[Reset] Flushed Redis caches and Celery task queues.")
+    except Exception as e:
+        logger.warning(f"[Reset] Error flushing Redis: {e}")
+
+    return {"status": "cleared", "message": "Neo4j, PostgreSQL, MinIO, and Redis cleared successfully."}

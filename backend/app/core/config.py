@@ -30,6 +30,7 @@ class Settings(BaseSettings):
 
     # Celery & Redis
     REDIS_URI: str = os.getenv("REDIS_URI", "redis://localhost:6379/0")
+    REDIS_URL: str = os.getenv("REDIS_URL", os.getenv("REDIS_URI", "redis://localhost:6379/0"))
     ZINGG_URL: str = os.getenv("ZINGG_URL", "http://localhost:8001")
 
     # Optional Mongo settings retained for potential future external connectors

@@ -6,39 +6,51 @@ from pydantic import BaseModel
 from neo4j import GraphDatabase
 from app.core.config import settings
 from app.core.database import get_db_context
-from app.models.postgres_models import AnomalyFindingModel, AnomalyRunModel
+from app.models.postgres_models import AnomalyFindingModel, AnomalyRunModel, DetectionSignalModel
 from app.services.anomaly_engine import run_anomaly_detection
 from app.anomaly.registry.detector_registry import detector_registry
 
 logger = logging.getLogger("AnomalyAPI")
 router = APIRouter()
 
+
 class AnomalyFilter(BaseModel):
     severity: List[str] = []
     entity_type: List[str] = []
     search: str = ""
 
+
 @router.post("/analyze")
 def trigger_analysis(case_id: Optional[str] = None, sync: bool = True):
     """
-    Triggers end-to-end multi-engine anomaly analysis.
+    Triggers end-to-end multi-engine investigative anomaly analysis.
     Defaults to direct synchronous execution for guaranteed, immediate completion.
     """
+    target_case_id = case_id
+    if not target_case_id:
+        with get_db_context() as db:
+            from app.models.postgres_models import CaseModel
+            c = db.query(CaseModel).order_by(CaseModel.created_at.desc()).first()
+            if not c:
+                raise HTTPException(status_code=400, detail="No active cases found. Please create a case first.")
+            target_case_id = c.case_id
+
     if sync:
-        logger.info(f"Executing multi-engine anomaly analysis synchronously for case: {case_id or 'ACTIVE'}")
-        result = run_anomaly_detection(case_id=case_id)
+        logger.info(f"Executing multi-engine anomaly analysis synchronously for case: {target_case_id}")
+        result = run_anomaly_detection(case_id=target_case_id)
         return {"message": "Analysis completed", "result": result}
     try:
-        task = run_anomaly_detection.delay(case_id=case_id)
+        task = run_anomaly_detection.delay(case_id=target_case_id)
         return {"message": "Analysis started", "task_id": task.id}
     except Exception as e:
         logger.warning(f"[Celery] Task queuing unavailable ({e}), executing synchronously...")
-        result = run_anomaly_detection(case_id=case_id)
+        result = run_anomaly_detection(case_id=target_case_id)
         return {"message": "Analysis completed (direct mode)", "result": result}
+
 
 @router.get("/health")
 def get_detector_health():
-    """Returns the operational status and metadata of all 11+ registered anomaly engines."""
+    """Returns operational status and metadata for all 11+ registered anomaly engines."""
     detectors = detector_registry.get_all_detectors()
     return {
         "status": "HEALTHY",
@@ -57,201 +69,190 @@ def get_detector_health():
         ]
     }
 
+
 @router.get("")
 def get_anomalies(
     severity: str = "",
     entity_type: str = "",
     search: str = "",
+    case_id: Optional[str] = None,
     limit: int = 100
 ):
     """
-    Retrieves anomaly findings from Neo4j / PostgreSQL.
-    Maintains 100% backward compatibility with the frontend AnomaliesTab and Drawer.
+    Retrieves synthesized, evidence-grounded investigative findings from PostgreSQL.
+    Surfaces rich human-readable fields: primaryEntities, relatedEntities,
+    whatHappened, whyUnusual, whyRelevant, supportingObservations, detectorSummary.
     """
-    driver = GraphDatabase.driver(settings.NEO4J_URI, auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD))
-    try:
-        with driver.session() as session:
-            where_clauses = []
-            params: Dict[str, Any] = {"limit": limit}
+    with get_db_context() as db:
+        target_case_id = case_id
+        if not target_case_id:
+            from app.models.postgres_models import CaseModel
+            c = db.query(CaseModel).order_by(CaseModel.created_at.desc()).first()
+            if not c:
+                return {"anomalies": [], "total": 0}
+            target_case_id = c.case_id
 
-            if severity:
-                where_clauses.append("a.severity IN $severities")
-                params["severities"] = [s.strip().upper() for s in severity.split(",") if s.strip()]
+        query = db.query(AnomalyFindingModel).filter(AnomalyFindingModel.case_id == target_case_id)
+        if severity:
+            query = query.filter(AnomalyFindingModel.severity.in_([s.strip().upper() for s in severity.split(",") if s.strip()]))
+        if entity_type:
+            query = query.filter(AnomalyFindingModel.entity_type.in_([e.strip() for e in entity_type.split(",") if e.strip()]))
+        if search:
+            query = query.filter(
+                (AnomalyFindingModel.entity_id.ilike(f"%{search}%")) |
+                (AnomalyFindingModel.title.ilike(f"%{search}%")) |
+                (AnomalyFindingModel.what_happened.ilike(f"%{search}%"))
+            )
 
-            if entity_type:
-                where_clauses.append("a.entityType IN $entity_types")
-                params["entity_types"] = [e.strip() for e in entity_type.split(",") if e.strip()]
+        rows = query.order_by(AnomalyFindingModel.unified_score.desc()).limit(limit).all()
+        return {
+            "anomalies": [
+                {
+                    "id": r.finding_id,
+                    "entityId": r.entity_id,
+                    "entityType": r.entity_type or "Person",
+                    "type": r.pattern_type or r.primary_detector_type or "Investigative Finding",
+                    "category": r.category or r.domain or "GENERAL",
+                    "patternType": r.pattern_type or r.primary_detector_type,
+                    "severity": r.severity,
+                    "score": r.unified_score,
+                    "status": r.status or "DETECTED",
+                    "title": r.title,
+                    "whatHappened": r.what_happened or r.explanation or "",
+                    "whyUnusual": r.why_unusual or "Activity differs significantly from normal citizen baseline.",
+                    "whyRelevant": r.why_relevant or "Directly implicated in active case investigation scope.",
+                    "caseRelevance": r.case_relevance or "HIGH",
+                    "investigativePriority": r.investigative_priority or "MEDIUM",
+                    "primaryEntities": r.primary_entities or [],
+                    "relatedEntities": r.related_entities or [],
+                    "supportingObservations": r.supporting_observations or [],
+                    "detectorSummary": r.detector_summary or [],
+                    "reasons": r.signals or [r.title],
+                    "metrics": r.metrics or {},
+                    "timelineContext": r.timeline_context or {},
+                    "graphContext": r.graph_context or {},
+                    "spatialContext": r.spatial_context or {},
+                    "supportingEvents": r.supporting_events or [],
+                    "detectedAt": r.created_at.isoformat() if r.created_at else None,
+                    "confidence": r.confidence or 0.9,
+                    "domain": r.domain or "CROSS_DOMAIN",
+                    "contributingDetectors": r.contributing_detectors or r.detectors or [],
+                    "evidence_refs": r.evidence_refs or [],
+                    "canonical_event_refs": r.canonical_event_refs or []
+                }
+                for r in rows
+            ],
+            "total": len(rows)
+        }
 
-            if search:
-                # Resilient pure Cypher search without APOC dependency
-                where_clauses.append("(toLower(a.entityId) CONTAINS toLower($search) OR any(r IN a.reasons WHERE toLower(r) CONTAINS toLower($search)))")
-                params["search"] = search
-
-            where_string = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
-
-            query = f"""
-                MATCH (a:Anomaly)
-                OPTIONAL MATCH (e)-[:HAS_ANOMALY]->(a)
-                {where_string}
-                RETURN a, coalesce(a.entityId, e.id) AS entityId, coalesce(a.entityType, labels(e)[0]) AS entityType
-                ORDER BY a.score DESC
-                LIMIT $limit
-            """
-            result = session.run(query, params)
-            anomalies = []
-            for record in result:
-                anomaly = record["a"]
-                metrics_val = anomaly.get("metrics")
-                if isinstance(metrics_val, str):
-                    try:
-                        metrics_val = json.loads(metrics_val)
-                    except Exception:
-                        pass
-
-                detected_at = anomaly.get("detectedAt")
-                detected_iso = detected_at.iso_format() if hasattr(detected_at, "iso_format") else str(detected_at) if detected_at else None
-
-                anomalies.append({
-                    "id": anomaly.get("id"),
-                    "entityId": anomaly.get("entityId") or record.get("entityId"),
-                    "entityType": anomaly.get("entityType") or record.get("entityType") or "Person",
-                    "type": anomaly.get("type", "Multi-Engine Anomaly"),
-                    "severity": anomaly.get("severity", "MEDIUM"),
-                    "score": float(anomaly.get("score", 0.0)),
-                    "status": anomaly.get("status", "NEW"),
-                    "reasons": anomaly.get("reasons", []),
-                    "metrics": metrics_val or {},
-                    "detectedAt": detected_iso,
-                    "title": anomaly.get("title", ""),
-                    "confidence": float(anomaly.get("confidence", 1.0)),
-                    "investigativePriority": anomaly.get("investigativePriority", "MEDIUM"),
-                    "domain": anomaly.get("domain", "CROSS_DOMAIN"),
-                    "contributingDetectors": anomaly.get("contributingDetectors", [])
-                })
-            return {"anomalies": anomalies}
-    except Exception as e:
-        logger.error(f"Error reading anomalies from Neo4j, falling back to PostgreSQL: {e}")
-        # Fallback to PostgreSQL
-        with get_db_context() as db:
-            query = db.query(AnomalyFindingModel)
-            if severity:
-                query = query.filter(AnomalyFindingModel.severity.in_([s.strip().upper() for s in severity.split(",")]))
-            if entity_type:
-                query = query.filter(AnomalyFindingModel.entity_type.in_([e.strip() for e in entity_type.split(",")]))
-            rows = query.order_by(AnomalyFindingModel.unified_score.desc()).limit(limit).all()
-            return {
-                "anomalies": [
-                    {
-                        "id": r.finding_id,
-                        "entityId": r.entity_id,
-                        "entityType": r.entity_type,
-                        "type": r.primary_detector_type,
-                        "severity": r.severity,
-                        "score": r.unified_score,
-                        "status": r.status,
-                        "reasons": r.signals,
-                        "metrics": r.metrics or {},
-                        "detectedAt": r.created_at.isoformat() if r.created_at else None,
-                        "title": r.title,
-                        "confidence": r.confidence,
-                        "investigativePriority": r.investigative_priority,
-                        "domain": r.domain,
-                        "contributingDetectors": r.contributing_detectors
-                    }
-                    for r in rows
-                ]
-            }
-    finally:
-        driver.close()
 
 @router.get("/stats")
-def get_anomaly_stats():
+def get_anomaly_stats(case_id: Optional[str] = None):
     """
-    Returns counts by severity band for the overview and radar dashboard.
+    Returns counts by severity band and total findings for the overview and radar dashboard.
     """
-    driver = GraphDatabase.driver(settings.NEO4J_URI, auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD))
-    try:
-        with driver.session() as session:
-            result = session.run("""
-                MATCH (a:Anomaly)
-                RETURN 
-                    count(a) AS total,
-                    sum(CASE WHEN a.severity = 'CRITICAL' THEN 1 ELSE 0 END) AS critical,
-                    sum(CASE WHEN a.severity = 'HIGH' THEN 1 ELSE 0 END) AS high,
-                    sum(CASE WHEN a.severity = 'MEDIUM' THEN 1 ELSE 0 END) AS medium,
-                    sum(CASE WHEN a.severity = 'LOW' THEN 1 ELSE 0 END) AS low
-            """)
-            record = result.single()
-            if record and record["total"]:
-                return {
-                    "total": int(record["total"] or 0),
-                    "critical": int(record["critical"] or 0),
-                    "high": int(record["high"] or 0),
-                    "medium": int(record["medium"] or 0),
-                    "low": int(record["low"] or 0)
-                }
-    except Exception as e:
-        logger.warning(f"Neo4j stats query failed ({e}), querying PostgreSQL...")
-    finally:
-        driver.close()
-
-    # Fallback to PostgreSQL
     with get_db_context() as db:
         from sqlalchemy import func, case
-        row = db.query(
+        from app.models.postgres_models import CaseModel
+        target_case_id = case_id
+        if not target_case_id:
+            c = db.query(CaseModel).order_by(CaseModel.created_at.desc()).first()
+            if not c:
+                return {
+                    "total": 0, "critical": 0, "high": 0, "medium": 0, "low": 0,
+                    "total_signals": 0
+                }
+            target_case_id = c.case_id
+
+        query = db.query(
             func.count(AnomalyFindingModel.finding_id).label("total"),
             func.sum(case((AnomalyFindingModel.severity == 'CRITICAL', 1), else_=0)).label("critical"),
             func.sum(case((AnomalyFindingModel.severity == 'HIGH', 1), else_=0)).label("high"),
             func.sum(case((AnomalyFindingModel.severity == 'MEDIUM', 1), else_=0)).label("medium"),
             func.sum(case((AnomalyFindingModel.severity == 'LOW', 1), else_=0)).label("low")
-        ).first()
+        ).filter(AnomalyFindingModel.case_id == target_case_id)
+        row = query.first()
+
+        # Signal counts
+        sig_count_query = db.query(func.count(DetectionSignalModel.signal_id)).filter(DetectionSignalModel.case_id == target_case_id)
+        total_signals = sig_count_query.scalar() or 0
 
         return {
-            "total": int(row.total or 0),
-            "critical": int(row.critical or 0),
-            "high": int(row.high or 0),
-            "medium": int(row.medium or 0),
-            "low": int(row.low or 0)
+            "total": int(row.total or 0) if row else 0,
+            "critical": int(row.critical or 0) if row else 0,
+            "high": int(row.high or 0) if row else 0,
+            "medium": int(row.medium or 0) if row else 0,
+            "low": int(row.low or 0) if row else 0,
+            "total_signals": int(total_signals)
         }
 
-@router.get("/{finding_id}")
-def get_anomaly_detail(finding_id: str):
+
+@router.get("/cases/{case_id}/summary")
+def get_case_investigative_summary(case_id: str):
     """
-    Retrieves complete analytical detail, provenance, metrics, and explanations for a finding.
+    Returns an investigator-oriented summary:
+    e.g., '4 investigative findings identified from 21 underlying detection signals.'
     """
     with get_db_context() as db:
-        finding = db.query(AnomalyFindingModel).filter_by(finding_id=finding_id).first()
-        if not finding:
-            raise HTTPException(status_code=404, detail=f"Anomaly finding '{finding_id}' not found.")
+        findings = db.query(AnomalyFindingModel).filter_by(case_id=case_id).order_by(AnomalyFindingModel.unified_score.desc()).all()
+        signals_count = db.query(DetectionSignalModel).filter_by(case_id=case_id).count()
 
         return {
-            "finding_id": finding.finding_id,
-            "case_id": finding.case_id,
-            "entity_id": finding.entity_id,
-            "entity_type": finding.entity_type,
-            "fingerprint": finding.fingerprint,
-            "title": finding.title,
-            "severity": finding.severity,
-            "unified_score": finding.unified_score,
-            "confidence": finding.confidence,
-            "investigative_priority": finding.investigative_priority,
-            "domain": finding.domain,
-            "primary_detector_type": finding.primary_detector_type,
-            "contributing_detectors": finding.contributing_detectors,
-            "signals": finding.signals,
-            "explanation": finding.explanation,
-            "metrics": finding.metrics,
-            "evidence_refs": finding.evidence_refs,
-            "canonical_event_refs": finding.canonical_event_refs,
-            "graph_refs": finding.graph_refs,
-            "model_metadata": finding.model_metadata,
-            "status": finding.status,
-            "created_at": finding.created_at.isoformat() if finding.created_at else None
+            "case_id": case_id,
+            "total_findings": len(findings),
+            "total_detection_signals": signals_count,
+            "summary_text": f"{len(findings)} investigative findings identified from {signals_count} underlying detection signals.",
+            "top_findings": [
+                {
+                    "finding_id": f.finding_id,
+                    "title": f.title,
+                    "severity": f.severity,
+                    "priority": f.investigative_priority,
+                    "what_happened": f.what_happened or f.explanation,
+                    "detectors": f.contributing_detectors or f.detectors or []
+                }
+                for f in findings[:5]
+            ]
         }
+
+
+@router.get("/cases/{case_id}/signals")
+def get_case_signals(case_id: str, limit: int = 200):
+    """
+    Retrieves all raw machine-generated DetectionSignals for a case.
+    Used by advanced analysts, audit logging, and model debugging.
+    """
+    with get_db_context() as db:
+        signals = db.query(DetectionSignalModel).filter_by(case_id=case_id).order_by(DetectionSignalModel.created_at.desc()).limit(limit).all()
+        return {
+            "case_id": case_id,
+            "total_signals": len(signals),
+            "signals": [
+                {
+                    "signal_id": s.signal_id,
+                    "detector_id": s.detector_id,
+                    "pattern_type": s.pattern_type,
+                    "signal_type": s.signal_type,
+                    "domain": s.domain,
+                    "entity_refs": s.entity_refs,
+                    "event_refs": s.event_refs,
+                    "evidence_refs": s.evidence_refs,
+                    "observations": s.observations,
+                    "baseline": s.baseline,
+                    "metrics": s.metrics,
+                    "normalized_score": s.normalized_score,
+                    "confidence": s.detector_confidence,
+                    "status": s.status,
+                    "generated_at": s.created_at.isoformat() if s.created_at else None
+                }
+                for s in signals
+            ]
+        }
+
 
 @router.get("/cases/{case_id}/findings")
 def get_case_anomaly_findings(case_id: str):
-    """Retrieves all anomaly findings scoped to a specific case."""
+    """Retrieves all investigative findings scoped to a specific case."""
     with get_db_context() as db:
         findings = db.query(AnomalyFindingModel).filter_by(case_id=case_id).order_by(AnomalyFindingModel.unified_score.desc()).all()
         return {
@@ -267,11 +268,139 @@ def get_case_anomaly_findings(case_id: str):
                     "unified_score": f.unified_score,
                     "confidence": f.confidence,
                     "priority": f.investigative_priority,
-                    "domain": f.domain,
+                    "domain": f.category or f.domain,
+                    "what_happened": f.what_happened or f.explanation,
+                    "why_unusual": f.why_unusual,
+                    "why_relevant": f.why_relevant,
+                    "case_relevance": f.case_relevance,
                     "signals": f.signals,
-                    "explanation": f.explanation,
-                    "evidence_count": len(f.evidence_refs or [])
+                    "explanation": f.what_happened or f.explanation,
+                    "evidence_count": len(f.evidence_refs or []),
+                    "detectors": f.contributing_detectors or f.detectors or []
                 }
                 for f in findings
             ]
+        }
+
+
+@router.get("/findings/{finding_id}")
+@router.get("/{finding_id}")
+def get_anomaly_detail(finding_id: str):
+    """
+    Retrieves complete analytical detail, narrative layers, timeline, spatial, graph,
+    and evidence provenance for an investigative finding.
+    """
+    with get_db_context() as db:
+        finding = db.query(AnomalyFindingModel).filter_by(finding_id=finding_id).first()
+        if not finding:
+            raise HTTPException(status_code=404, detail=f"Investigative finding '{finding_id}' not found.")
+
+        return {
+            "finding_id": finding.finding_id,
+            "case_id": finding.case_id,
+            "entity_id": finding.entity_id,
+            "entity_type": finding.entity_type,
+            "fingerprint": finding.fingerprint,
+            "title": finding.title,
+            "category": finding.category or finding.domain,
+            "pattern_type": finding.pattern_type or finding.primary_detector_type,
+            "severity": finding.severity,
+            "unified_score": finding.unified_score,
+            "confidence": finding.confidence,
+            "investigative_priority": finding.investigative_priority,
+            "case_relevance": finding.case_relevance or "HIGH",
+            "relevance_reasons": finding.relevance_reasons or [],
+            "what_happened": finding.what_happened or finding.explanation or (finding.signals[0] if finding.signals else ""),
+            "why_unusual": finding.why_unusual or "Activity departs significantly from expected baseline.",
+            "why_relevant": finding.why_relevant or "Directly touches case entities and investigation scope.",
+            "primary_entities": finding.primary_entities or [{"entity_id": finding.entity_id, "display_name": finding.entity_id, "entity_type": finding.entity_type}],
+            "related_entities": finding.related_entities or [],
+            "time_range": finding.time_range or {},
+            "locations": finding.locations or [],
+            "domain": finding.domain,
+            "primary_detector_type": finding.primary_detector_type,
+            "contributing_detectors": finding.contributing_detectors or finding.detectors or [],
+            "detectors": finding.detectors or finding.contributing_detectors or [],
+            "detector_summary": finding.detector_summary or [],
+            "signals": finding.signals,
+            "supporting_observations": finding.supporting_observations or finding.signals or [],
+            "supporting_signals": finding.supporting_signals or [],
+            "supporting_events": finding.supporting_events or [],
+            "explanation": finding.what_happened or finding.explanation,
+            "metrics": finding.metrics or {},
+            "graph_context": finding.graph_context or {},
+            "timeline_context": finding.timeline_context or {},
+            "spatial_context": finding.spatial_context or {},
+            "evidence_refs": finding.evidence_refs or [],
+            "canonical_event_refs": finding.canonical_event_refs or [],
+            "evidence_quality": finding.evidence_quality or "HIGH",
+            "technical_details": finding.technical_details or finding.model_metadata or {},
+            "provenance": finding.provenance or {},
+            "status": finding.status,
+            "created_at": finding.created_at.isoformat() if finding.created_at else None,
+            "updated_at": finding.updated_at.isoformat() if finding.updated_at else None
+        }
+
+
+@router.get("/findings/{finding_id}/evidence")
+def get_finding_evidence(finding_id: str):
+    """Retrieves verified evidence references and canonical event links for a finding."""
+    with get_db_context() as db:
+        finding = db.query(AnomalyFindingModel).filter_by(finding_id=finding_id).first()
+        if not finding:
+            raise HTTPException(status_code=404, detail=f"Finding '{finding_id}' not found.")
+
+        return {
+            "finding_id": finding.finding_id,
+            "case_id": finding.case_id,
+            "evidence_refs": finding.evidence_refs or [],
+            "canonical_event_refs": finding.canonical_event_refs or [],
+            "supporting_events": finding.supporting_events or [],
+            "evidence_quality": finding.evidence_quality or "HIGH"
+        }
+
+
+@router.get("/findings/{finding_id}/timeline")
+def get_finding_timeline(finding_id: str):
+    """Retrieves chronological event sequence and time offsets for a finding."""
+    with get_db_context() as db:
+        finding = db.query(AnomalyFindingModel).filter_by(finding_id=finding_id).first()
+        if not finding:
+            raise HTTPException(status_code=404, detail=f"Finding '{finding_id}' not found.")
+
+        return {
+            "finding_id": finding.finding_id,
+            "timeline_context": finding.timeline_context or {},
+            "supporting_events": finding.supporting_events or []
+        }
+
+
+@router.get("/findings/{finding_id}/graph-context")
+def get_finding_graph_context(finding_id: str):
+    """Retrieves focused subgraph, structural broker role, and neighborhood for a finding."""
+    with get_db_context() as db:
+        finding = db.query(AnomalyFindingModel).filter_by(finding_id=finding_id).first()
+        if not finding:
+            raise HTTPException(status_code=404, detail=f"Finding '{finding_id}' not found.")
+
+        return {
+            "finding_id": finding.finding_id,
+            "graph_context": finding.graph_context or {},
+            "primary_entities": finding.primary_entities or [],
+            "related_entities": finding.related_entities or []
+        }
+
+
+@router.get("/findings/{finding_id}/spatial-context")
+def get_finding_spatial_context(finding_id: str):
+    """Retrieves geographic waypoints and movement analysis for a finding."""
+    with get_db_context() as db:
+        finding = db.query(AnomalyFindingModel).filter_by(finding_id=finding_id).first()
+        if not finding:
+            raise HTTPException(status_code=404, detail=f"Finding '{finding_id}' not found.")
+
+        return {
+            "finding_id": finding.finding_id,
+            "spatial_context": finding.spatial_context or {},
+            "locations": finding.locations or []
         }

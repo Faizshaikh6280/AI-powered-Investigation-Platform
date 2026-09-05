@@ -12,7 +12,10 @@ class InvestigationState(TypedDict):
     final_intelligence_dossier: str
 
 # Use the Gemini Flash model
-llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
+try:
+    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
+except Exception:
+    llm = None
 
 def run_financial_agent(state: InvestigationState) -> Dict[str, Any]:
     sys_prompt = """You are a Financial & Syndicate Structure Analyst.

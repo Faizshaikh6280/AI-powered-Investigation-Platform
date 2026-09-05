@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { apiClient, GoldenProfile } from '../services/apiClient';
 import { cn } from '../utils/cn';
+import { useCase } from '../context/CaseContext';
 
 interface EntityResolutionMatrixProps {
   onViewOnGraph?: (entityId: string) => void;
@@ -14,6 +15,7 @@ interface EntityResolutionMatrixProps {
 }
 
 export default function EntityResolutionMatrix({ onViewOnGraph, onNavigateToAnomalies }: EntityResolutionMatrixProps) {
+  const { activeCase } = useCase();
   const [activeFilter, setActiveFilter] = useState('All');
   const [search, setSearch] = useState('');
   const [profiles, setProfiles] = useState<GoldenProfile[]>([]);
@@ -24,7 +26,7 @@ export default function EntityResolutionMatrix({ onViewOnGraph, onNavigateToAnom
   const fetchProfiles = async () => {
     setIsLoading(true);
     try {
-      const data = await apiClient.getGoldenProfiles();
+      const data = await apiClient.getGoldenProfiles(activeCase?.case_id);
       setProfiles(data || []);
     } catch (err) {
       console.error('Failed to fetch golden profiles:', err);
@@ -35,14 +37,14 @@ export default function EntityResolutionMatrix({ onViewOnGraph, onNavigateToAnom
 
   useEffect(() => {
     fetchProfiles();
-  }, []);
+  }, [activeCase?.case_id]);
 
   const handleRunZingg = async () => {
     setIsExecutingER(true);
-    setStatusMsg('Running Zingg ER clustering across cross-domain evidence...');
+    setStatusMsg(`Running Zingg ER clustering across evidence for ${activeCase?.case_reference || activeCase?.title || 'active case'}...`);
     try {
-      const res = await apiClient.executeZinggER();
-      setStatusMsg(`Zingg ER finished: Resolved into Golden Identity Profiles.`);
+      const res = await apiClient.executeZinggER(activeCase?.case_id);
+      setStatusMsg(`Zingg ER finished: Resolved ${res.golden_profiles !== undefined ? res.golden_profiles : ''} Golden Identity Profiles.`);
       await fetchProfiles();
       setTimeout(() => setStatusMsg(null), 4000);
     } catch (err: any) {

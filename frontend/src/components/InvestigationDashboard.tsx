@@ -138,7 +138,8 @@ export function InvestigationDashboard({ activeCaseId }: Props) {
     if (!selectedCommunity) return;
     setDossierState({ status: 'running', messages: [], htmlContent: '' });
 
-    const eventSource = new EventSource(`http://localhost:8000/api/v1/investigation/community/${selectedCommunity}/synthesize`);
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || '';
+    const eventSource = new EventSource(`${apiBase}/api/v1/investigation/community/${selectedCommunity}/synthesize`);
     
     eventSource.onmessage = (event) => {
       const parsed = JSON.parse(event.data);
@@ -246,3 +247,5 @@ export function InvestigationDashboard({ activeCaseId }: Props) {
     </div>
   );
 }
+
+export default InvestigationDashboard;

@@ -49,19 +49,9 @@ export default function DataIngestionVault({ onNavigateToPipeline }: DataIngesti
     }
   };
 
-  const handleTriggerAll = async () => {
-    setIsTriggering(true);
-    setError(null);
-    try {
-      await apiClient.triggerAllIngestion();
-      await refreshCases();
-      if (onNavigateToPipeline) {
-        onNavigateToPipeline();
-      }
-    } catch (err: any) {
-      setError(err.message || 'Failed to trigger ingestion pipeline');
-    } finally {
-      setIsTriggering(false);
+  const handleGoToPipeline = () => {
+    if (onNavigateToPipeline) {
+      onNavigateToPipeline();
     }
   };
 
@@ -121,14 +111,15 @@ export default function DataIngestionVault({ onNavigateToPipeline }: DataIngesti
             {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
             Upload Evidence Files
           </button>
-          <button
-            onClick={handleTriggerAll}
-            disabled={isTriggering}
-            className="px-4 py-2 bg-secondary text-foreground border border-border text-sm font-medium rounded-lg hover:bg-secondary/80 transition-colors flex items-center gap-2 disabled:opacity-50"
-          >
-            {isTriggering ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 text-emerald-500" />}
-            Process All Files
-          </button>
+          {evidenceList.length > 0 && onNavigateToPipeline && (
+            <button
+              onClick={handleGoToPipeline}
+              className="px-4 py-2 bg-secondary text-foreground border border-border text-sm font-medium rounded-lg hover:bg-secondary/80 transition-colors flex items-center gap-2 shadow-sm"
+            >
+              <Play className="w-4 h-4 text-emerald-500" />
+              Go to Processing Pipeline
+            </button>
+          )}
         </div>
       </div>
 

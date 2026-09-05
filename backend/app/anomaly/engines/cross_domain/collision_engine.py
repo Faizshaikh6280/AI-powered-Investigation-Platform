@@ -35,9 +35,9 @@ class CrossDomainCollisionEngine(BaseDetector):
         meta = self.get_metadata()
         events = entity_data.get("all_events", [])
 
-        # Group events by domain
+        # Group events by domain: Correlate Financial transactions with Telecom and Network telemetry
         bank_evs = [e for e in events if e.get("domain") == "BANKING" or e.get("source_type") == "BANKING"]
-        comm_evs = [e for e in events if e.get("domain") in ("TELECOM", "SOCIAL", "NETWORK") or e.get("source_type") in ("TELECOM", "SOCIAL", "NETWORK")]
+        comm_evs = [e for e in events if e.get("domain") in ("TELECOM", "NETWORK") or e.get("source_type") in ("TELECOM", "NETWORK")]
 
         if not bank_evs or not comm_evs:
             return DetectorExecutionResult(
@@ -47,7 +47,7 @@ class CrossDomainCollisionEngine(BaseDetector):
                 entity_id=entity_id,
                 case_id=case_id,
                 domain=meta.domain,
-                not_applicable_reason="Requires events in at least two distinct operational domains (Financial + Telemetry/Social)."
+                not_applicable_reason="Requires events in at least two distinct operational domains (Financial + Telemetry/Network)."
             )
 
         collisions = []
@@ -56,7 +56,7 @@ class CrossDomainCollisionEngine(BaseDetector):
             if not b_ts_str:
                 continue
             b_dt = datetime.fromisoformat(b_ts_str.replace("Z", "+00:00"))
-            b_amt = b.get("financial", {}).get("amount_inr", 0.0)
+            b_amt = float(b.get("financial", {}).get("amount_inr", 0.0) or b.get("attributes", {}).get("amount", 0.0))
 
             for c in comm_evs:
                 c_ts_str = c.get("timestamp")
@@ -78,7 +78,8 @@ class CrossDomainCollisionEngine(BaseDetector):
                         "comm_domain": c_domain,
                         "delta_minutes": round(delta_min, 1),
                         "ip": c_ip,
-                        "tower": c_tower
+                        "tower": c_tower,
+                        "timestamp": b_ts_str
                     })
 
         if not collisions:
@@ -91,6 +92,17 @@ class CrossDomainCollisionEngine(BaseDetector):
                 domain=meta.domain
             )
 
+        # Focus on peak coordinated activity burst episode (cluster of highest multi-modal volume)
+        collisions_by_window = {}
+        for col in collisions:
+            ts_key = col["timestamp"][:10]  # Date grouping for primary operational burst
+            if ts_key not in collisions_by_window:
+                collisions_by_window[ts_key] = []
+            collisions_by_window[ts_key].append(col)
+
+        best_window = max(collisions_by_window.keys(), key=lambda k: sum(c["amount_inr"] for c in collisions_by_window[k]))
+        collisions = collisions_by_window[best_window]
+
         signals = []
         for col in collisions[:3]:
             detail = f"₹{col['amount_inr']:,.2f} transfer correlated with {col['comm_domain']} activity within {col['delta_minutes']} minutes"
@@ -100,8 +112,8 @@ class CrossDomainCollisionEngine(BaseDetector):
                 detail += f" from IP {col['ip']}"
             signals.append(f"Multi-Domain Collision: {detail}.")
 
-        score = min(100.0, 70.0 + (len(collisions) * 10.0))
-        explanation = f"Cross-domain correlation engine detected {len(collisions)} temporal collisions between financial transactions and real-time communications/logins."
+        score = min(90.0, 70.0 + (len(collisions) * 4.0))
+        explanation = "Financial, communication and network activity cluster in the same short operational window."
 
         event_refs = list({c["financial_event"] for c in collisions}.union({c["comm_event"] for c in collisions}))
 
@@ -115,11 +127,11 @@ class CrossDomainCollisionEngine(BaseDetector):
             domain=meta.domain,
             raw_score=float(len(collisions)),
             normalized_score=round(score, 1),
-            confidence=0.96,  # Multi-domain cross-validation carries highest confidence
-            title="Cross-Domain Financial & Communications Collision",
+            confidence=0.91,
+            title="Cross-Domain Coordinated Activity Burst",
             signals=signals,
             features={"collisions_count": len(collisions), "collisions": collisions[:5]},
             explanation=explanation,
             evidence_refs=entity_data.get("evidence_ids", []),
-            canonical_event_refs=event_refs[:10]
+            canonical_event_refs=event_refs
         )

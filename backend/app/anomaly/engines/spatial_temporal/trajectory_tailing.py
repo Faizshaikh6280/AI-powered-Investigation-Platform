@@ -35,10 +35,10 @@ class TrajectoryTailingDetector(BaseDetector):
         context: Dict[str, Any]
     ) -> DetectorExecutionResult:
         meta = self.get_metadata()
-        all_entities = context.get("all_entity_store", {})
         my_waypoints = entity_data.get("spatial", {}).get("waypoints", [])
+        total_dist = float(entity_data.get("spatial", {}).get("total_distance_km", 0.0))
 
-        if len(my_waypoints) < 2:
+        if len(my_waypoints) < 3 or total_dist < 1.0:
             return DetectorExecutionResult(
                 detector_id=meta.detector_id,
                 detector_type=meta.detector_type,
@@ -46,7 +46,7 @@ class TrajectoryTailingDetector(BaseDetector):
                 entity_id=entity_id,
                 case_id=case_id,
                 domain=meta.domain,
-                not_applicable_reason="Insufficient waypoints for trajectory modeling."
+                not_applicable_reason="Insufficient movement trajectory points for tailing detection."
             )
 
         tailing_detected = []
@@ -63,9 +63,9 @@ class TrajectoryTailingDetector(BaseDetector):
 
             matching_segments = 0
             for w1 in my_waypoints:
-                t1 = datetime.fromisoformat(w1["timestamp"])
+                t1 = w1["dt"] if isinstance(w1.get("dt"), datetime) else datetime.fromisoformat(str(w1.get("timestamp") or w1.get("dt")).replace("Z", "+00:00"))
                 for w2 in other_wp:
-                    t2 = datetime.fromisoformat(w2["timestamp"])
+                    t2 = w2["dt"] if isinstance(w2.get("dt"), datetime) else datetime.fromisoformat(str(w2.get("timestamp") or w2.get("dt")).replace("Z", "+00:00"))
                     lag = (t1 - t2).total_seconds()
                     # Check if w1 is trailing w2 within lag window
                     if 0 <= lag <= max_lag:

@@ -47,6 +47,9 @@ class KYCParser(BaseParser):
             email = str(row.get("email")).strip() if row.get("email") else None
             address = str(row.get("address")).strip() if row.get("address") else None
 
+            account_num = str(row.get("account") or row.get("account_number") or row.get("bank_account") or "").strip() or None
+            dob = str(row.get("date_of_birth") or row.get("dob") or "").strip() or None
+
             entities = CanonicalEntities(
                 name=name,
                 phone=phone,
@@ -58,10 +61,14 @@ class KYCParser(BaseParser):
                 address=address
             )
 
-            financial = CanonicalFinancial()
+            financial = CanonicalFinancial(
+                account_number=account_num
+            )
 
             attributes = {
-                "record_id": row.get("record_id", f"KYC-{idx}"),
+                "record_id": row.get("kyc_record_id") or row.get("record_id", f"KYC-{idx}"),
+                "account": account_num,
+                "date_of_birth": dob,
                 "data_source": row.get("data_source", "KYC"),
                 "occupation": row.get("occupation")
             }
@@ -75,7 +82,9 @@ class KYCParser(BaseParser):
                 parser_version=self.parser_version
             )
 
+            rec_id = str(attributes.get("record_id", f"KYC-{idx}")).strip()
             events.append(CanonicalEvent(
+                event_id=rec_id,
                 case_id=case_id,
                 evidence_id=evidence_id,
                 event_type="IDENTITY_RECORD",

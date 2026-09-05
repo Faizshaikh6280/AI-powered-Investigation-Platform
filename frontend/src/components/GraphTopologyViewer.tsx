@@ -13,12 +13,15 @@ import cola from 'cytoscape-cola';
 import fcose from 'cytoscape-fcose';
 import { useTheme } from 'next-themes';
 import { cn } from '../utils/cn';
+import { useCase } from '../context/CaseContext';
 
-// Register layouts
-if (!cytoscape.layouts || !cytoscape.layouts.some((l: any) => l.name === 'dagre')) {
+// Register layouts safely
+try {
   cytoscape.use(dagre);
   cytoscape.use(cola);
   cytoscape.use(fcose);
+} catch {
+  // Ignored if already registered
 }
 
 // Map types to icons/colors
@@ -68,6 +71,7 @@ const Drawer = ({ isOpen, onClose, title, children, width = 'w-96' }: any) => (
 );
 
 export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?: string | null }) {
+  const { activeCase } = useCase();
   const { resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   
@@ -79,6 +83,7 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
   const [activeDrawer, setActiveDrawer] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<any>(null);
   const [selectedEdge, setSelectedEdge] = useState<any>(null);
+  const [activeFocusId, setActiveFocusId] = useState<string | null>(focusEntityId || null);
   const [graphData, setGraphData] = useState<{nodes: any[], edges: any[]}>({nodes: [], edges: []});
   const [loading, setLoading] = useState(true);
   const [layoutName, setLayoutName] = useState('fcose');
@@ -98,7 +103,10 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
 
   const fetchData = () => {
     setLoading(true);
-    fetch('/api/graph/topology')
+    const url = activeCase?.case_id 
+      ? `/api/graph/topology?case_id=${encodeURIComponent(activeCase.case_id)}`
+      : '/api/graph/topology';
+    fetch(url)
       .then(r => r.json())
       .then(data => {
         setGraphData(data);
@@ -112,7 +120,7 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [activeCase?.case_id]);
 
   // Compute stats for Network Summary and Filters
   const stats = useMemo(() => {
@@ -284,7 +292,7 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
     cyRef.current = cytoscape({
       container: containerRef.current,
       elements: elements,
-      style: getGraphStyle(isDark),
+      style: getGraphStyle(isDark) as any,
       layout: {
         name: layoutName,
         animate: true,
@@ -296,7 +304,7 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
         nodeSeparation: 150, // Increased for wider spacing
         rankSep: 150,
         minNodeSpacing: 80
-      }
+      } as any
     });
 
     cyRef.current.on('tap', 'node', (evt: any) => {
@@ -349,6 +357,7 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
 
   useEffect(() => {
     if (focusEntityId && cyRef.current) {
+      setActiveFocusId(focusEntityId);
       let node = cyRef.current.getElementById(focusEntityId);
       if (!node || node.length === 0) {
         node = cyRef.current.nodes().filter((n: any) => {
@@ -368,15 +377,31 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
         const connectedEdges = targetNode.connectedEdges();
         const connectedNodes = connectedEdges.connectedNodes();
         
+        // Dim all unrelated nodes and edges
         cyRef.current.elements().not(targetNode).not(connectedNodes).not(connectedEdges).addClass('dimmed');
         targetNode.addClass('highlighted');
-        connectedEdges.addClass('highlighted');
-        connectedNodes.addClass('highlighted');
+        
+        // Sequential path animation along connected edges
+        connectedEdges.forEach((edge: any, idx: number) => {
+          setTimeout(() => {
+            if (cyRef.current) {
+              edge.addClass('highlighted');
+            }
+          }, idx * 120);
+        });
+
+        connectedNodes.forEach((n: any, idx: number) => {
+          setTimeout(() => {
+            if (cyRef.current) {
+              n.addClass('highlighted');
+            }
+          }, idx * 120 + 80);
+        });
         
         cyRef.current.animate({
-          zoom: 1.5,
+          zoom: 1.4,
           center: { eles: targetNode },
-          duration: 1000,
+          duration: 900,
           easing: 'ease-in-out'
         });
 
@@ -406,6 +431,29 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
               <Network className="w-8 h-8 text-primary animate-pulse" />
               <p className="text-sm font-medium text-foreground">Loading investigation network...</p>
             </div>
+          </div>
+        )}
+
+        {/* Subgraph Focus Floating Banner */}
+        {activeFocusId && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-3 px-4 py-2 bg-card/90 backdrop-blur-md border border-primary/40 rounded-xl shadow-xl z-20 animate-in fade-in slide-in-from-top-2">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="w-2 h-2 rounded-full bg-primary animate-ping" />
+              <span className="font-bold text-foreground">Subgraph Focus:</span>
+              <span className="font-mono text-primary font-bold">{activeFocusId}</span>
+            </div>
+            <button
+              onClick={() => {
+                setActiveFocusId(null);
+                if (cyRef.current) {
+                  cyRef.current.elements().removeClass('highlighted dimmed');
+                  cyRef.current.animate({ fit: { padding: 50 }, duration: 500 });
+                }
+              }}
+              className="text-[11px] font-bold bg-secondary hover:bg-secondary/80 text-foreground px-2.5 py-1 rounded-md border border-border flex items-center gap-1 transition-colors"
+            >
+              <X className="w-3 h-3" /> Reset View
+            </button>
           </div>
         )}
 
@@ -697,3 +745,5 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
     </div>
   );
 }
+
+export { GraphTopologyViewer };
