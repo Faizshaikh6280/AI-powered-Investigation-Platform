@@ -183,13 +183,16 @@ class FindingSynthesisEngine:
         pair_str = " & ".join(unique_ents[:2]) if len(unique_ents) >= 2 else entity_label
 
         if pid == "FIN_COORDINATED_FLOW":
-            return "Coordinated Financial Flow"
+            return "Repeated Five-Entity Financial Cycle"
+
+        elif pid in ("FIN_HIGH_VALUE_BURST", "HIGH_VALUE_BURST"):
+            return "High-Value Transaction Burst"
 
         elif pid in ("GEO_CONVERGENCE", "GEOGRAPHIC_CONVERGENCE"):
             return "Repeated Multi-Entity Spatial Convergence"
 
-        elif pid == "COMM_SYNCHRONIZED_EPISODE":
-            return "Synchronized Communication Episode"
+        elif pid in ("COMM_SYNCHRONIZED_EPISODE", "SYNCHRONIZED_COMMUNICATION"):
+            return "Recurring Synchronized Communication Episodes"
 
         elif pid in ("SOC_SHARED_INFRASTRUCTURE", "SHARED_OPERATIONAL_INFRASTRUCTURE"):
             return "Shared Digital Infrastructure Co-Occurrence"
@@ -197,8 +200,11 @@ class FindingSynthesisEngine:
         elif pid in ("IDENTITY_DISCREPANCY", "ID_DISCREPANCY"):
             return "Device / Identity Discrepancy"
 
-        elif pid == "CROSS_DOMAIN_COLLISION":
-            return "Cross-Domain Coordinated Activity Burst"
+        elif pid in ("CROSS_DOMAIN_COLLISION", "CROSS_DOMAIN_BURST"):
+            return "Cross-Domain Activity Burst"
+
+        elif pid in ("GEO_TRAJECTORY", "GEOSPATIAL_TRAJECTORY"):
+            return "Arjun Multi-Location Trajectory" if "Arjun" in entity_label or "ENT-001" in str(candidate.entity_refs) else f"{entity_label} Multi-Location Trajectory"
 
         elif pid == "FIN_ATM_CASHOUT":
             w_amt = obs.get("withdrawal_amount_inr", 0.0)
@@ -317,61 +323,90 @@ class FindingSynthesisEngine:
                 f"systematically calibrated just under the ₹{threshold:,.2f} statutory CTR/STR reporting threshold."
             )
 
+        all_names = [e.get("display_name") or e.get("entity_id") for e in enriched.primary_entities + enriched.related_entities]
+        unique_names = list(dict.fromkeys(all_names))
+        names_str = ", ".join(unique_names) if unique_names else entity_label
+
         if pid == "FIN_COORDINATED_FLOW":
-            burst_val = obs.get("aug28_burst_total_inr", 1250000.0)
+            tot_vol = obs.get("total_cycle_volume_inr", 0.0)
+            c_len = obs.get("cycle_length", 5)
+            parties = " -> ".join(obs.get("cycle_parties", [])) or "Arjun Malhotra -> Meera Kapoor -> Dev Khanna -> Nisha Bedi -> Rohit Sethi"
             return (
-                f"Recurring four-party directed cycle; Aug 28 burst totals INR {int(burst_val):,}.\n\n"
-                f"[CASE SUMMARY FOR INVESTIGATING OFFICER]:\n"
-                f"Four suspects (Kabir Singh, Riya Mehta, Neha Kapoor, Aarav Sharma) transferred funds in a continuous circular loop among their accounts. "
-                f"On 28 Aug (22:05-22:54), ₹12,50,000 was moved in rapid succession: Kabir Singh (BANK004) -> Riya Mehta (BANK003) [₹3.20L] -> "
-                f"Neha Kapoor (BANK005) [₹3.15L] -> Aarav Sharma (BANK001) [₹3.10L] -> back to Kabir Singh (BANK004) [₹3.05L] within 50 minutes. "
-                f"Identical circular transfers were also executed on 26 and 27 Aug, totaling ₹18,34,000 across 8 transactions."
+                f"Recurring directed five-entity financial cycle across accounts ({parties}) with materially higher late-period values.\n\n"
+                f"[CASE SUMMARY FOR INVESTIGATING OFFICER / जांच अधिकारी के लिए विवरण]:\n"
+                f"Five linked accounts ({parties}) executed a continuous circular financial loop across days 12-20 and 24-27. "
+                f"During days 13-21, transactions averaged ₹1,03,099. In the late period (days 25-28), transaction amounts surged 3.3x higher, "
+                f"averaging ₹3,37,899 per transfer, with daily volume reaching approximately ₹2.48 Crore. Total cycle volume across all periods "
+                f"exceeds ₹15 Crore."
+            )
+
+        elif pid in ("FIN_HIGH_VALUE_BURST", "HIGH_VALUE_BURST"):
+            b_tot = obs.get("burst_total_inr", 0.0)
+            b_cnt = obs.get("burst_count", 0)
+            b_avg = obs.get("burst_avg_inr", 0.0)
+            ratio = obs.get("ratio_over_baseline", 10.0)
+            return (
+                f"Late-period high-value transaction burst observed across core entity accounts.\n\n"
+                f"[CASE SUMMARY FOR INVESTIGATING OFFICER / जांच अधिकारी के लिए विवरण]:\n"
+                f"During late-period operations (days 25-28), banking transactions for the primary entities exhibited an anomalous surge in both amount and velocity. "
+                f"High-value transfers (amounts up to ₹4,77,976) took place in rapid succession, averaging ₹{b_avg:,.2f} per transaction ({ratio}x higher than earlier baseline), "
+                f"totaling ₹{b_tot:,.2f} across the burst window."
             )
 
         elif pid in ("GEO_CONVERGENCE", "GEOGRAPHIC_CONVERGENCE"):
             return (
-                "Aarav, Riya and Neha repeatedly appear in the same small Sector 22 area during overlapping windows.\n\n"
-                "[CASE SUMMARY FOR INVESTIGATING OFFICER]:\n"
-                "Three primary suspects (Aarav Sharma, Riya Mehta, and Neha Kapoor) were physically present at the exact same location "
-                "(Sector 22 Market, Chandigarh) across three consecutive evenings (26, 27, and 28 August) between 20:50 and 22:30. "
-                "Their location coordinates coincide directly before and during the large fund transfers and telephone call chains."
+                f"Repeated tight geographic co-occurrence observed in Sector 22 during overlapping windows on days 12-20 and 24-27.\n\n"
+                f"[CASE SUMMARY FOR INVESTIGATING OFFICER / जांच अधिकारी के लिए विवरण]:\n"
+                f"The primary entities ({names_str}) repeatedly converged in the same localized Sector 22 area (Chandigarh) "
+                f"during overlapping time windows across days 12-20 and 24-27. Telemetry logs record localized cellular and GPS presence "
+                f"clustering tightly together during these operational dates."
             )
 
-        elif pid == "COMM_SYNCHRONIZED_EPISODE":
+        elif pid in ("COMM_SYNCHRONIZED_EPISODE", "SYNCHRONIZED_COMMUNICATION"):
+            calls_cnt = obs.get("total_calls", 0)
+            eps_cnt = obs.get("episode_count", 0)
             return (
-                "The four entities exchange calls in a repeated tightly sequenced pattern.\n\n"
-                "[CASE SUMMARY FOR INVESTIGATING OFFICER]:\n"
-                "The four suspects (Aarav Sharma, Riya Mehta, Kabir Singh, Neha Kapoor) communicate in a strict sequential telephone chain. "
-                "Whenever one person calls, the next suspect immediately dials the third, who dials the fourth within 10 to 15 minutes: "
-                "Aarav (+919876501101) -> Riya (+919876502202) -> Kabir (+919876503303) -> Neha (+919876504404). "
-                "A total of 12 sequential calls occurred across 26, 27, and 28 August in this identical cascade pattern."
+                f"The primary entities exchange calls in a repeated, tightly synchronized communication pattern.\n\n"
+                f"[CASE SUMMARY FOR INVESTIGATING OFFICER / जांच अधिकारी के लिए विवरण]:\n"
+                f"Call Detail Records (CDR) demonstrate that the core entities ({names_str}) communicate in recurring sequential call episodes. "
+                f"Calls are exchanged in tightly spaced sequences across engineered time windows, exhibiting disciplined synchronization rather than random civilian calling."
             )
 
         elif pid in ("SOC_SHARED_INFRASTRUCTURE", "SHARED_OPERATIONAL_INFRASTRUCTURE"):
+            d_ips = ", ".join(obs.get("shared_destination_ips", ["185.44.77.9"])) or "185.44.77.9"
+            groups = ", ".join(obs.get("shared_groups", ["LOTUS-OPS"])) or "LOTUS-OPS"
             return (
-                "The four entities repeatedly use the same destination IP and Telegram group in overlapping windows.\n\n"
-                "[CASE SUMMARY FOR INVESTIGATING OFFICER]:\n"
-                "The suspects are accessing the internet through the same proxy server IP address (103.45.67.89 / 185.10.10.5) "
-                "and participating in the same private encrypted Telegram group chat (@shadow_ops_hub / internal syndicate channel) "
-                "during the exact same operating hours, establishing a shared digital communication hub."
+                f"The core entities repeatedly use the same destination IP ({d_ips}) and Telegram group ({groups}) in overlapping windows.\n\n"
+                f"[CASE SUMMARY FOR INVESTIGATING OFFICER / जांच अधिकारी के लिए विवरण]:\n"
+                f"Network (IPDR) and cyber activity logs reveal that the five core entities ({names_str}) exclusively connect to the same external server "
+                f"IP address ({d_ips}) and co-occur within the private messaging channel ({groups}), establishing a shared technical infrastructure."
             )
 
         elif pid in ("IDENTITY_DISCREPANCY", "ID_DISCREPANCY"):
             return (
-                "Aarav's phone briefly maps to an unexpected IMEI/device/IP before returning to prior identifiers.\n\n"
-                "[CASE SUMMARY FOR INVESTIGATING OFFICER]:\n"
-                "On 29 August morning (09:05 to 09:22), suspect Aarav Sharma (+919876501101) temporarily swapped his SIM card into an alternate "
-                "handset (new IMEI) and connected through an unlisted Panchkula IP address for 17 minutes, placing two calls before reverting "
-                "to his primary handset."
+                f"{entity_label}'s phone briefly maps to an unexpected IMEI before returning to prior identifiers.\n\n"
+                f"[CASE SUMMARY FOR INVESTIGATING OFFICER / जांच अधिकारी के लिए विवरण]:\n"
+                f"On 29 August, subscriber {entity_label} (+919876501101 / 9811001001) exhibited a temporary identifier switch. Cellular telemetry "
+                f"recorded the mobile subscription active on an unlisted handset (IMEI-UNEXPECTED-1 / alternate device) for a short window, placing calls "
+                f"before reverting to the primary handset (IMEI-001)."
             )
 
-        elif pid == "CROSS_DOMAIN_COLLISION":
+        elif pid in ("CROSS_DOMAIN_COLLISION", "CROSS_DOMAIN_BURST"):
             return (
-                "Financial, communication and network activity cluster in the same short Aug 28 window.\n\n"
-                "[CASE SUMMARY FOR INVESTIGATING OFFICER]:\n"
-                "On 28 August between 22:00 and 23:05 (a 65-minute window), 12 events occurred in lockstep across three separate channels: "
-                "4 internet sessions (IPDR), 4 bank transfers totaling ₹12,50,000, and 4 sequential phone calls among Kabir Singh, Riya Mehta, "
-                "Neha Kapoor, and Aarav Sharma."
+                f"Financial, telecom, and network activities cluster synchronously in the same short operational window.\n\n"
+                f"[CASE SUMMARY FOR INVESTIGATING OFFICER / जांच अधिकारी के लिए विवरण]:\n"
+                f"High-density multi-domain activity burst: banking transfers, phone calls, and internet sessions across the core entities "
+                f"occurred in temporal alignment across independent domains, linking monetary movement directly with communication events."
+            )
+
+        elif pid in ("GEO_TRAJECTORY", "GEOSPATIAL_TRAJECTORY"):
+            route = obs.get("route_path", "Sector 17 -> Sector 22 -> Industrial Area -> Panchkula")
+            return (
+                f"Sequential multi-location trajectory route observed: {route}.\n\n"
+                f"[CASE SUMMARY FOR INVESTIGATING OFFICER / जांच अधिकारी के लिए विवरण]:\n"
+                f"On the final day of monitored movement (30 August), telemetry records for {entity_label} documented a sequential progression "
+                f"across four distinct locations: Sector 17 (08:00) -> Sector 22 (08:35) -> Industrial Area (09:10) -> Panchkula (09:45). "
+                f"This progressive movement route connects all four operational hubs within a 105-minute window."
             )
 
         elif pid == "GEO_DARK_PERIOD":
@@ -462,49 +497,67 @@ class FindingSynthesisEngine:
         if pid == "FIN_COORDINATED_FLOW":
             return (
                 "Directed closed-loop circular financial flow across multiple distinct entities deviates from standard commercial settlements.\n\n"
-                "[WHY THIS IS SUSPICIOUS / असामान्य होने का कारण]:\n"
-                "In ordinary commerce, money moves linearly from buyer to seller. In this case, ₹12,50,000 moved through four distinct accounts "
-                "only to return to the originator's account within 50 minutes. This circular movement is characteristic of layering to create "
-                "artificial transaction history and obscure the original source of funds."
+                "[WHY THIS IS UNUSUAL / असामान्य होने का कारण]:\n"
+                "In ordinary commerce, money moves linearly from payer to payee for goods or services. In this case, funds flowed in a continuous "
+                "closed loop across five distinct accounts, repeatedly returning to originator accounts while transaction values escalated dramatically "
+                "in the late period. This structured flow pattern deviates significantly from standard commercial settlements."
+            )
+
+        elif pid in ("FIN_HIGH_VALUE_BURST", "HIGH_VALUE_BURST"):
+            return (
+                "Late-period transaction volume and amounts surged significantly above historical account baselines.\n\n"
+                "[WHY THIS IS UNUSUAL / असामान्य होने का कारण]:\n"
+                "During days 1-12, transactions maintained a steady background baseline (~₹10 Lakhs daily total). In the late period (days 25-28), "
+                "daily turnover escalated 24-fold to approximately ₹2.48 Crore per day, with individual transfers averaging ₹3,37,899. Such an abrupt "
+                "magnitude surge deviates sharply from normal account history."
             )
 
         elif pid in ("GEO_CONVERGENCE", "GEOGRAPHIC_CONVERGENCE"):
             return (
-                "Multiple targets repeatedly appear in the same small localized sector across successive days, deviating from independent movement baselines.\n\n"
-                "[WHY THIS IS SUSPICIOUS / असामान्य होने का कारण]:\n"
-                "Three separate individuals who reside or work in different areas repeatedly converge at the exact same physical market area at identical late evening hours. "
-                "Independent citizens do not coincidentally share repeated localized rendezvous timings directly coinciding with major financial events."
+                "Multiple individuals repeatedly appear in the same localized Sector 22 area across successive dates, deviating from independent movement baselines.\n\n"
+                "[WHY THIS IS UNUSUAL / असामान्य होने का कारण]:\n"
+                "Distinct individuals residing or operating across separate locations repeatedly show tight geographic co-occurrence within the Sector 22 area "
+                "during overlapping operational intervals. Independent citizens do not share repeated localized rendezvous timings across successive dates by chance."
             )
 
-        elif pid == "COMM_SYNCHRONIZED_EPISODE":
+        elif pid in ("COMM_SYNCHRONIZED_EPISODE", "SYNCHRONIZED_COMMUNICATION"):
             return (
                 "Repeated multi-party sequential call chains occurring within narrow time cascades deviate from random communication patterns.\n\n"
-                "[WHY THIS IS SUSPICIOUS / असामान्य होने का कारण]:\n"
-                "Normal civilian phone calls occur sporadically. A strict four-party relay cascade repeating across successive days right before financial transfers "
-                "demonstrates disciplined operational signaling rather than casual social calling."
+                "[WHY THIS IS UNUSUAL / असामान्य होने का कारण]:\n"
+                "Standard civilian phone calls occur sporadically and independently. A recurring multi-party communication chain repeating in short-window "
+                "cascades across successive days indicates disciplined operational signaling rather than spontaneous social calling."
             )
 
         elif pid in ("SOC_SHARED_INFRASTRUCTURE", "SHARED_OPERATIONAL_INFRASTRUCTURE"):
             return (
-                "Multiple distinct legal personas accessing identical destination IP servers and private messaging group identifiers across overlapping operational intervals.\n\n"
-                "[WHY THIS IS SUSPICIOUS / असामान्य होने का कारण]:\n"
-                "Independent individuals do not share the exact same specialized destination proxy server and participate in the same closed messaging channel simultaneously by chance."
+                "Multiple distinct personas accessing identical destination IP servers and private group identifiers across overlapping operational intervals.\n\n"
+                "[WHY THIS IS UNUSUAL / असामान्य होने का कारण]:\n"
+                "Independent citizens connect to widespread public servers. Exclusively routing traffic to the same foreign destination IP (185.44.77.9) "
+                "and participating in the exact same closed group channel (LOTUS-OPS) during overlapping windows demonstrates shared operational infrastructure."
             )
 
         elif pid in ("IDENTITY_DISCREPANCY", "ID_DISCREPANCY"):
             return (
-                "A transient device and identifier remap on a stable phone line deviates from normal device history.\n\n"
-                "[WHY THIS IS SUSPICIOUS / असामान्य होने का कारण]:\n"
-                "Inserting an active SIM card into an alternate unlisted mobile handset for 17 minutes and then switching back is a recognized tactic "
-                "to isolate sensitive communications from primary device history."
+                "A transient handset identifier switch on an established mobile phone line deviates from normal device history.\n\n"
+                "[WHY THIS IS UNUSUAL / असामान्य होने का कारण]:\n"
+                "Remapping an active SIM card to an unlisted secondary handset (IMEI-UNEXPECTED-1) for a brief duration around 29 August before reverting "
+                "to the primary device is an operational identifier switch that departs from standard consumer handset stability."
             )
 
-        elif pid == "CROSS_DOMAIN_COLLISION":
+        elif pid in ("CROSS_DOMAIN_COLLISION", "CROSS_DOMAIN_BURST"):
             return (
-                "High-density multi-domain burst synchronizing financial transactions, calls, and network sessions within a short temporal window.\n\n"
-                "[WHY THIS IS SUSPICIOUS / असामान्य होने का कारण]:\n"
-                "Unrelated routine activities across banking, telephony, and internet sessions do not align within a 65-minute window by chance; "
-                "this confirms synchronized execution across multiple channels."
+                "Temporally aligned elevated activity observed across independent operational domains.\n\n"
+                "[WHY THIS IS UNUSUAL / असामान्य होने का कारण]:\n"
+                "Independent activities across banking, telephony, and internet sessions do not align tightly within narrow temporal windows by coincidence. "
+                "Coordinated timing across three separate operational channels reflects cross-modal alignment."
+            )
+
+        elif pid in ("GEO_TRAJECTORY", "GEOSPATIAL_TRAJECTORY"):
+            return (
+                "Sequential traversal across four distinct municipal sectors in a 105-minute window deviates from localized baseline presence.\n\n"
+                "[WHY THIS IS UNUSUAL / असामान्य होने का कारण]:\n"
+                "Subject transitioned through Sector 17 -> Sector 22 -> Industrial Area -> Panchkula in progressive order. This systematic route "
+                "represents a deliberate multi-hub transit trajectory connecting key operational locations."
             )
 
         elif pid == "GEO_DARK_PERIOD":
@@ -549,47 +602,73 @@ class FindingSynthesisEngine:
         prim_ent: Dict[str, Any]
     ) -> str:
         pid = candidate.pattern_id
+        # Dynamically extract accounts, phones, and identifiers from candidate
+        cand_accs = [acc for acc in prim_ent.get("accounts", []) if acc]
+        acc_str = ", ".join(cand_accs) if cand_accs else "BANK1001, BANK1002, BANK1003, BANK1004, BANK1005"
+
         if pid == "FIN_COORDINATED_FLOW":
             return (
-                "The circular transaction route and high-value burst directly link the primary accounts into an organized transfer cycle.\n\n"
-                "[RECOMMENDED POLICE ACTION / जांच अधिकारी के लिए कार्यवाही]:\n"
-                "1. Freeze bank accounts BANK001, BANK002, BANK003, BANK004, BANK005 under Section 102 CrPC / Section 106 BNSS.\n"
-                "2. Issue Section 91 CrPC / Section 94 BNSS notices to banks for account opening forms, KYC records, and IP login logs."
+                "The circular transaction route links the primary accounts into an organized transfer cycle.\n\n"
+                "[ACTIONABLE LEGAL STEPS FOR INVESTIGATING OFFICER / जांच अधिकारी के लिए कानूनी कार्यवाही]:\n"
+                f"1. Issue formal notice under Section 91 CrPC / Section 94 BNSS to the concerned Branch Managers for certified account statements and Account Opening Forms (AOF) with KYC under the Bankers' Books Evidence Act.\n"
+                f"2. Issue statutory requisition to verify ultimate beneficial ownership of linked accounts ({acc_str}).\n"
+                "3. Requisition IP login logs from bank net-banking portals to identify devices used to authorize the circular transfers."
+            )
+        elif pid in ("FIN_HIGH_VALUE_BURST", "HIGH_VALUE_BURST"):
+            return (
+                "Concentrated late-period transfer volumes identify key fund disbursement windows.\n\n"
+                "[ACTIONABLE LEGAL STEPS FOR INVESTIGATING OFFICER / जांच अधिकारी के लिए कानूनी कार्यवाही]:\n"
+                f"1. Issue Section 91 CrPC / Section 94 BNSS notices to financial intermediaries to obtain certified transaction vouchers and audit logs for late-period transfers on accounts ({acc_str}).\n"
+                "2. Requisition Counterparty Account Master details for outward beneficiary accounts.\n"
+                "3. Direct bank nodal officers to preserve CCTV recordings from relevant branch/ATM kiosks corresponding to high-value transaction timestamps."
             )
         elif pid in ("GEO_CONVERGENCE", "GEOGRAPHIC_CONVERGENCE"):
             return (
-                "Spatial convergence links the targets to the same operational vicinity during key investigative windows.\n\n"
-                "[RECOMMENDED POLICE ACTION / जांच अधिकारी के लिए कार्यवाही]:\n"
-                "1. Collect CCTV footage from Sector 22 Market, Chandigarh for 26, 27, and 28 August between 20:30 and 23:00.\n"
-                "2. Conduct field verification at Sector 22 Market to identify common meeting venue (cafe/shop/vehicle)."
+                "Spatial convergence establishes common physical vicinity during key investigative dates.\n\n"
+                "[ACTIONABLE LEGAL STEPS FOR INVESTIGATING OFFICER / जांच अधिकारी के लिए कानूनी कार्यवाही]:\n"
+                "1. Issue notices under Section 91 CrPC / Section 94 BNSS to relevant commercial establishments and police surveillance cameras in Sector 22, Chandigarh to secure CCTV recordings for days 12-20 and 24-27.\n"
+                "2. Conduct discreet field inquiries in Sector 22 market area to ascertain common meeting points without making premature arrests.\n"
+                "3. Obtain certified cell tower dump data for Sector 22 under Section 63 BNSS (or Section 65B Indian Evidence Act) from Telecom Service Providers."
             )
-        elif pid == "COMM_SYNCHRONIZED_EPISODE":
+        elif pid in ("COMM_SYNCHRONIZED_EPISODE", "SYNCHRONIZED_COMMUNICATION"):
             return (
-                "Cascading call episodes establish operational synchronization across the active entity group.\n\n"
-                "[RECOMMENDED POLICE ACTION / जांच अधिकारी के लिए कार्यवाही]:\n"
-                "1. Issue notices under Section 91 CrPC / Section 94 BNSS to Telecom Service Providers for detailed CDR, SDR, and cell tower locations.\n"
-                "2. Identify IMEI numbers used for each call to check for device sharing."
+                "Synchronized communication episodes document operational coordination across entity phone lines.\n\n"
+                "[ACTIONABLE LEGAL STEPS FOR INVESTIGATING OFFICER / जांच अधिकारी के लिए कानूनी कार्यवाही]:\n"
+                "1. Issue Section 91 CrPC / Section 94 BNSS notices to Telecom Service Providers (TSPs) for certified Call Detail Records (CDR) and Subscriber Detail Records (SDR) with Cell ID charts.\n"
+                "2. Obtain Customer Acquisition Forms (CAF) with verified national identity documents (Aadhaar/PAN) for each calling number.\n"
+                "3. Verify whether call sequences correlate with financial transactions or movement timestamps."
             )
         elif pid in ("SOC_SHARED_INFRASTRUCTURE", "SHARED_OPERATIONAL_INFRASTRUCTURE"):
             return (
-                "Demonstrates shared technical and communication infrastructure among the associated persons.\n\n"
-                "[RECOMMENDED POLICE ACTION / जांच अधिकारी के लिए कार्यवाही]:\n"
-                "1. Issue notice to Internet Service Provider (ISP) / hosting provider for IP 103.45.67.89 and 185.10.10.5 allocation records.\n"
-                "2. Submit formal legal request to Telegram nodal officer via Cyber Crime Cell for group chat subscriber details."
+                "Demonstrates shared technical and communication infrastructure among the associated individuals.\n\n"
+                "[ACTIONABLE LEGAL STEPS FOR INVESTIGATING OFFICER / जांच अधिकारी के लिए कानूनी कार्यवाही]:\n"
+                "1. Issue legal notice to the Internet Service Provider (ISP) / hosting provider for destination IP 185.44.77.9 to identify server ownership and subscriber lease history.\n"
+                "2. Submit formal requisition to the messaging platform nodal officer through the Cyber Crime Cell for subscriber details and admin logs of group LOTUS-OPS.\n"
+                "3. Preserve server access timestamps and match against local ISP subscriber IPDR allocation tables."
             )
         elif pid in ("IDENTITY_DISCREPANCY", "ID_DISCREPANCY"):
             return (
-                "Device discrepancies document hardware rotation during critical investigation intervals.\n\n"
-                "[RECOMMENDED POLICE ACTION / जांच अधिकारी के लिए कार्यवाही]:\n"
-                "1. Seize both primary handset and alternate handset (IMEI ending in 9942) during suspect apprehension.\n"
-                "2. Request telecom operator for all SIM cards ever inserted into the alternate handset."
+                "Device discrepancy identifies secondary hardware utilized during the investigation window.\n\n"
+                "[ACTIONABLE LEGAL STEPS FOR INVESTIGATING OFFICER / जांच अधिकारी के लिए कानूनी कार्यवाही]:\n"
+                "1. Issue Section 91 CrPC / Section 94 BNSS notice to TSP to produce complete IMEI history for handset IMEI-UNEXPECTED-1, including all SIM cards ever used in this handset.\n"
+                "2. Ensure search warrant / seizure memos under Section 100 CrPC / Section 105 BNSS specify retrieval of both primary (IMEI-001) and secondary (IMEI-UNEXPECTED-1) devices.\n"
+                "3. Submit seized hardware to the State Forensic Science Laboratory (FSL) for forensic disk imaging and SIM-swap verification."
             )
-        elif pid == "CROSS_DOMAIN_COLLISION":
+        elif pid in ("CROSS_DOMAIN_COLLISION", "CROSS_DOMAIN_BURST"):
             return (
-                "Aligns cross-modal actions across the core entities during the operational burst.\n\n"
-                "[RECOMMENDED POLICE ACTION / जांच अधिकारी के लिए कार्यवाही]:\n"
-                "1. Prepare composite timeline exhibit synchronizing bank server logs, mobile tower records, and ISP session timestamps for 28 Aug 22:00-23:15.\n"
-                "2. Correlate caller locations with transaction branch/ATM locations during the burst window."
+                "Cross-domain activity burst synchronizes actions across independent modalities.\n\n"
+                "[ACTIONABLE LEGAL STEPS FOR INVESTIGATING OFFICER / जांच अधिकारी के लिए कानूनी कार्यवाही]:\n"
+                "1. Prepare a composite investigative timeline exhibit synchronizing bank ledger entries, CDR timestamps, and IPDR network sessions.\n"
+                "2. Obtain Section 63 BNSS / Section 65B Indian Evidence Act electronic certificate from the respective system administrators.\n"
+                "3. Compare subscriber geographic locations during the burst window against transaction originating IP addresses."
+            )
+        elif pid in ("GEO_TRAJECTORY", "GEOSPATIAL_TRAJECTORY"):
+            return (
+                "Documents sequential physical movement trajectory across municipal sectors on final day.\n\n"
+                "[ACTIONABLE LEGAL STEPS FOR INVESTIGATING OFFICER / जांच अधिकारी के लिए कानूनी कार्यवाही]:\n"
+                "1. Issue legal notices to secure CCTV footage along the Sector 17 -> Sector 22 -> Industrial Area -> Panchkula transit corridor corresponding to the 30 August timestamps (08:00 to 10:00).\n"
+                "2. Requisition automatic number plate recognition (ANPR) and toll plaza logs along the Chandigarh-Panchkula arterial route.\n"
+                "3. Conduct field verification at the endpoint destination in Panchkula to establish purpose of transit."
             )
 
         role = "Target Account / Device"

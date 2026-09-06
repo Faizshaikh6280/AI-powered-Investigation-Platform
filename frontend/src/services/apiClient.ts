@@ -93,6 +93,187 @@ export interface GeoSyncData {
   waypoints: GeospatialWaypoint[];
 }
 
+export interface TimelineCanonicalEvent {
+  event_id: string;
+  case_id: string;
+  event_type: string;
+  domain: string;
+  start_time: string;
+  end_time?: string;
+  raw_timestamp: string;
+  normalized_timestamp: string;
+  timestamp_ms: number;
+  timezone_offset?: string;
+  timestamp_precision: string;
+  timestamp_confidence: number;
+  source_type: string;
+  source_record_id?: string;
+  evidence_id: string;
+  evidence_filename?: string;
+  evidence_sha256?: string;
+  actor_entities: string[];
+  target_entities: string[];
+  related_entities: string[];
+  z_cluster_id?: string;
+  entity_name?: string;
+  location_name?: string;
+  latitude?: number;
+  longitude?: number;
+  location_source?: string;
+  location_confidence: number;
+  amount_inr?: number;
+  channel?: string;
+  txn_type?: string;
+  counterparty?: string;
+  narration?: string;
+  duration_seconds?: number;
+  bytes_transferred?: number;
+  client_ip?: string;
+  destination_ip?: string;
+  cell_tower_id?: string;
+  imei?: string;
+  attributes: Record<string, any>;
+  anomaly_score: number;
+  risk_level: string;
+  anomaly_ids: string[];
+  anomaly_reasons: string[];
+  confidence_score: number;
+  correlation_ids: string[];
+  epistemic_status: string;
+  provenance: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TemporalCorrelation {
+  correlation_id: string;
+  case_id: string;
+  event_a_id: string;
+  event_b_id: string;
+  relationship_type: string;
+  time_delta_seconds: number;
+  time_delta_formatted: string;
+  correlation_score: number;
+  rules_triggered: string[];
+  supporting_evidence: string[];
+  description: string;
+  epistemic_status: string;
+  actor_a?: string;
+  actor_b?: string;
+  domain_a?: string;
+  domain_b?: string;
+  timestamp_a: string;
+  timestamp_b: string;
+}
+
+export interface ActivityBurst {
+  burst_id: string;
+  case_id: string;
+  start_time: string;
+  end_time: string;
+  duration_seconds: number;
+  event_count: number;
+  entity_count: number;
+  domain_counts: Record<string, number>;
+  entities: string[];
+  event_ids: string[];
+  severity: string;
+  description: string;
+}
+
+export interface TemporalInconsistency {
+  inconsistency_id: string;
+  case_id: string;
+  entity_id: string;
+  entity_name?: string;
+  event_a_id: string;
+  event_b_id: string;
+  start_time: string;
+  end_time: string;
+  time_delta_seconds: number;
+  location_a: Record<string, any>;
+  location_b: Record<string, any>;
+  distance_km: number;
+  required_speed_kmh: number;
+  confidence: number;
+  evidence_refs: string[];
+  description: string;
+}
+
+export interface StorylineStep {
+  step_index: number;
+  event_id: string;
+  timestamp: string;
+  time_offset_from_start: string;
+  time_offset_from_prev: string;
+  domain: string;
+  event_type: string;
+  summary: string;
+  actors: string[];
+  amount_inr?: number;
+  location?: string;
+  evidence_id?: string;
+  is_anomaly: boolean;
+  anomaly_title?: string;
+}
+
+export interface StorylineSequence {
+  sequence_id: string;
+  case_id: string;
+  title: string;
+  summary: string;
+  category: string;
+  domain_span: string[];
+  start_time: string;
+  end_time: string;
+  total_duration_formatted: string;
+  steps: StorylineStep[];
+  event_ids: string[];
+  correlation_ids: string[];
+  intelligence_assessment: string;
+  confidence_score: number;
+}
+
+export interface TimeBucketDensity {
+  bucket_key: string;
+  start_ms: number;
+  end_ms: number;
+  event_count: number;
+  domain_counts: Record<string, number>;
+  anomaly_count: number;
+}
+
+export interface TimelineSummaryStats {
+  total_events: number;
+  total_entities: number;
+  total_anomalies: number;
+  total_correlations: number;
+  total_bursts: number;
+  total_inconsistencies: number;
+  domain_breakdown: Record<string, number>;
+  min_timestamp?: string;
+  max_timestamp?: string;
+}
+
+export interface TimelineQueryResponse {
+  case_id: string;
+  summary: TimelineSummaryStats;
+  events: TimelineCanonicalEvent[];
+  correlations: TemporalCorrelation[];
+  bursts: ActivityBurst[];
+  inconsistencies: TemporalInconsistency[];
+  density_buckets: TimeBucketDensity[];
+  entities: Array<{
+    id: string;
+    name: string;
+    cluster_id?: string;
+    event_count: number;
+    risk_score?: number;
+  }>;
+  has_more: boolean;
+  next_cursor?: string;
+}
+
 export interface AnomalyStats {
   total: number;
   critical: number;
@@ -257,6 +438,33 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return res.json();
 }
 
+// Lightweight in-memory cache for high-frequency queries
+const _apiCache = new Map<string, { data: any; expires: number }>();
+const _inflightRequests = new Map<string, Promise<any>>();
+
+async function cachedFetch<T>(key: string, ttlMs: number, fetcher: () => Promise<T>): Promise<T> {
+  const cached = _apiCache.get(key);
+  const now = Date.now();
+  if (cached && cached.expires > now) {
+    return cached.data as T;
+  }
+  if (_inflightRequests.has(key)) {
+    return _inflightRequests.get(key) as Promise<T>;
+  }
+  const promise = fetcher()
+    .then((data) => {
+      _apiCache.set(key, { data, expires: Date.now() + ttlMs });
+      _inflightRequests.delete(key);
+      return data;
+    })
+    .catch((err) => {
+      _inflightRequests.delete(key);
+      throw err;
+    });
+  _inflightRequests.set(key, promise);
+  return promise;
+}
+
 export const apiClient = {
   // === GENERIC REQUEST ===
   async request(endpoint: string, options?: RequestInit): Promise<any> {
@@ -267,16 +475,21 @@ export const apiClient = {
 
   // === CASES & EVIDENCE ===
   async listCases(): Promise<Case[]> {
-    const res = await fetch(`${API_BASE}/api/cases`);
-    return handleResponse<Case[]>(res);
+    return cachedFetch<Case[]>('list_cases', 4000, async () => {
+      const res = await fetch(`${API_BASE}/api/cases`);
+      return handleResponse<Case[]>(res);
+    });
   },
 
   async getCaseDetails(caseId: string): Promise<CaseDetail> {
-    const res = await fetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}`);
-    return handleResponse<CaseDetail>(res);
+    return cachedFetch<CaseDetail>(`case_detail_${caseId}`, 8000, async () => {
+      const res = await fetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}`);
+      return handleResponse<CaseDetail>(res);
+    });
   },
 
   async createCase(payload: CaseCreatePayload): Promise<Case> {
+    _apiCache.delete('list_cases');
     const res = await fetch(`${API_BASE}/api/cases`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -286,6 +499,8 @@ export const apiClient = {
   },
 
   async deleteCase(caseId: string): Promise<any> {
+    _apiCache.delete('list_cases');
+    _apiCache.delete(`case_detail_${caseId}`);
     const res = await fetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}`, {
       method: 'DELETE',
     });
@@ -293,6 +508,7 @@ export const apiClient = {
   },
 
   async deleteAllCases(): Promise<any> {
+    _apiCache.clear();
     const res = await fetch(`${API_BASE}/api/cases`, {
       method: 'DELETE',
     });
@@ -342,15 +558,19 @@ export const apiClient = {
   },
 
   async getGoldenProfiles(caseId?: string): Promise<GoldenProfile[]> {
-    const url = caseId 
-      ? `${API_BASE}/api/system/golden_profiles?case_id=${encodeURIComponent(caseId)}`
-      : `${API_BASE}/api/system/golden_profiles`;
-    const res = await fetch(url);
-    return handleResponse<GoldenProfile[]>(res);
+    const key = `golden_profiles_${caseId || 'default'}`;
+    return cachedFetch<GoldenProfile[]>(key, 8000, async () => {
+      const url = caseId 
+        ? `${API_BASE}/api/system/golden_profiles?case_id=${encodeURIComponent(caseId)}`
+        : `${API_BASE}/api/system/golden_profiles`;
+      const res = await fetch(url);
+      return handleResponse<GoldenProfile[]>(res);
+    });
   },
 
   // === GRAPH TOPOLOGY ===
   async syncGraph(caseId?: string): Promise<any> {
+    _apiCache.delete(`graph_topology_${caseId || 'default'}`);
     const url = caseId 
       ? `${API_BASE}/api/graph/sync?case_id=${encodeURIComponent(caseId)}`
       : `${API_BASE}/api/graph/sync`;
@@ -361,11 +581,19 @@ export const apiClient = {
   },
 
   async getGraphTopology(caseId?: string): Promise<GraphTopology> {
-    const url = caseId 
-      ? `${API_BASE}/api/graph/topology?case_id=${encodeURIComponent(caseId)}`
-      : `${API_BASE}/api/graph/topology`;
-    const res = await fetch(url);
-    return handleResponse<GraphTopology>(res);
+    const key = `graph_topology_${caseId || 'default'}`;
+    return cachedFetch<GraphTopology>(key, 10000, async () => {
+      try {
+        const url = caseId 
+          ? `${API_BASE}/api/graph/topology?case_id=${encodeURIComponent(caseId)}`
+          : `${API_BASE}/api/graph/topology`;
+        const res = await fetch(url);
+        return await handleResponse<GraphTopology>(res);
+      } catch (err) {
+        console.warn('Graph topology retrieval skipped/fallback:', err);
+        return { nodes: [], edges: [] };
+      }
+    });
   },
 
   // === TIMELINE & GEOSPATIAL ===
@@ -379,16 +607,21 @@ export const apiClient = {
 
   // === ANOMALY INTELLIGENCE ===
   async getDetectorHealth(): Promise<DetectorHealthResponse> {
-    const res = await fetch(`${API_BASE}/api/anomalies/health`);
-    return handleResponse<DetectorHealthResponse>(res);
+    return cachedFetch<DetectorHealthResponse>('detector_health', 15000, async () => {
+      const res = await fetch(`${API_BASE}/api/anomalies/health`);
+      return handleResponse<DetectorHealthResponse>(res);
+    });
   },
 
   async getAnomalyStats(caseId?: string): Promise<AnomalyStats> {
-    const url = caseId 
-      ? `${API_BASE}/api/anomalies/stats?case_id=${encodeURIComponent(caseId)}`
-      : `${API_BASE}/api/anomalies/stats`;
-    const res = await fetch(url);
-    return handleResponse<AnomalyStats>(res);
+    const key = `anomaly_stats_${caseId || 'default'}`;
+    return cachedFetch<AnomalyStats>(key, 8000, async () => {
+      const url = caseId 
+        ? `${API_BASE}/api/anomalies/stats?case_id=${encodeURIComponent(caseId)}`
+        : `${API_BASE}/api/anomalies/stats`;
+      const res = await fetch(url);
+      return handleResponse<AnomalyStats>(res);
+    });
   },
 
   async getAnomalies(params?: { search?: string; limit?: number; caseId?: string }): Promise<{ anomalies: AnomalyFinding[]; total: number }> {
@@ -449,5 +682,337 @@ export const apiClient = {
   async resetSystem(): Promise<any> {
     const res = await fetch(`${API_BASE}/api/system/reset`, { method: 'POST' });
     return handleResponse<any>(res);
+  },
+
+  // === TIMELINE & DIGITAL FOOTPRINT RECONSTRUCTION ===
+  async getTimelineEvents(params: {
+    case_id?: string;
+    entities?: string[];
+    domains?: string[];
+    event_types?: string[];
+    start_time?: string;
+    end_time?: string;
+    risk?: string[];
+    only_anomalies?: boolean;
+    min_confidence?: number;
+    search?: string;
+    zoom?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<TimelineQueryResponse> {
+    const query = new URLSearchParams();
+    if (params.case_id) query.append('case_id', params.case_id);
+    if (params.entities && params.entities.length > 0) query.append('entities', params.entities.join(','));
+    if (params.domains && params.domains.length > 0) query.append('domains', params.domains.join(','));
+    if (params.event_types && params.event_types.length > 0) query.append('event_types', params.event_types.join(','));
+    if (params.start_time) query.append('start_time', params.start_time);
+    if (params.end_time) query.append('end_time', params.end_time);
+    if (params.risk && params.risk.length > 0) query.append('risk', params.risk.join(','));
+    if (params.only_anomalies) query.append('only_anomalies', 'true');
+    if (params.min_confidence !== undefined) query.append('min_confidence', params.min_confidence.toString());
+    if (params.search) query.append('search', params.search);
+    if (params.zoom) query.append('zoom', params.zoom);
+    if (params.limit) query.append('limit', params.limit.toString());
+    if (params.offset) query.append('offset', params.offset.toString());
+
+    const url = `${API_BASE}/api/timeline/events${query.toString() ? `?${query.toString()}` : ''}`;
+    const res = await fetch(url);
+    return handleResponse<TimelineQueryResponse>(res);
+  },
+
+  async getTimelineEventDetail(eventId: string, caseId?: string): Promise<TimelineCanonicalEvent> {
+    const url = caseId
+      ? `${API_BASE}/api/timeline/events/${encodeURIComponent(eventId)}?case_id=${encodeURIComponent(caseId)}`
+      : `${API_BASE}/api/timeline/events/${encodeURIComponent(eventId)}`;
+    const res = await fetch(url);
+    return handleResponse<TimelineCanonicalEvent>(res);
+  },
+
+  async getTimelineEventContext(eventId: string, windowMinutes: number = 15, caseId?: string): Promise<{
+    target_event: TimelineCanonicalEvent;
+    window_minutes: number;
+    context_events: TimelineCanonicalEvent[];
+  }> {
+    const query = new URLSearchParams({ window_minutes: windowMinutes.toString() });
+    if (caseId) query.append('case_id', caseId);
+    const url = `${API_BASE}/api/timeline/events/${encodeURIComponent(eventId)}/context?${query.toString()}`;
+    const res = await fetch(url);
+    return handleResponse<any>(res);
+  },
+
+  async getTimelineCorrelations(caseId?: string): Promise<TemporalCorrelation[]> {
+    const url = caseId
+      ? `${API_BASE}/api/timeline/correlations?case_id=${encodeURIComponent(caseId)}`
+      : `${API_BASE}/api/timeline/correlations`;
+    const res = await fetch(url);
+    return handleResponse<TemporalCorrelation[]>(res);
+  },
+
+  async getTimelineBursts(caseId?: string): Promise<ActivityBurst[]> {
+    const url = caseId
+      ? `${API_BASE}/api/timeline/bursts?case_id=${encodeURIComponent(caseId)}`
+      : `${API_BASE}/api/timeline/bursts`;
+    const res = await fetch(url);
+    return handleResponse<ActivityBurst[]>(res);
+  },
+
+  async getTimelineInconsistencies(caseId?: string): Promise<TemporalInconsistency[]> {
+    const url = caseId
+      ? `${API_BASE}/api/timeline/inconsistencies?case_id=${encodeURIComponent(caseId)}`
+      : `${API_BASE}/api/timeline/inconsistencies`;
+    const res = await fetch(url);
+    return handleResponse<TemporalInconsistency[]>(res);
+  },
+
+  async getTimelineStorylines(caseId?: string): Promise<StorylineSequence[]> {
+    const url = caseId
+      ? `${API_BASE}/api/timeline/storylines?case_id=${encodeURIComponent(caseId)}`
+      : `${API_BASE}/api/timeline/storylines`;
+    const res = await fetch(url);
+    return handleResponse<StorylineSequence[]>(res);
+  },
+
+  async getTimelineCompare(entities: string[], caseId?: string): Promise<Record<string, TimelineCanonicalEvent[]>> {
+    const query = new URLSearchParams({ entities: entities.join(',') });
+    if (caseId) query.append('case_id', caseId);
+    const url = `${API_BASE}/api/timeline/compare?${query.toString()}`;
+    const res = await fetch(url);
+    return handleResponse<Record<string, TimelineCanonicalEvent[]>>(res);
+  },
+
+  // Geospatial Intelligence API
+  async getGeoInvestigation(caseId: string, params?: {
+    entity_ids?: string[];
+    domains?: string[];
+    start_time?: string;
+    end_time?: string;
+    min_confidence?: number;
+    bbox?: [number, number, number, number];
+  }): Promise<GeoInvestigationResponse> {
+    const query = new URLSearchParams({ case_id: caseId });
+    if (params?.entity_ids?.length) query.append('entity_ids', params.entity_ids.join(','));
+    if (params?.domains?.length) query.append('domains', params.domains.join(','));
+    if (params?.start_time) query.append('start_time', params.start_time);
+    if (params?.end_time) query.append('end_time', params.end_time);
+    if (params?.min_confidence !== undefined) query.append('min_confidence', params.min_confidence.toString());
+    if (params?.bbox && params.bbox.length === 4) {
+      query.append('min_lng', params.bbox[0].toString());
+      query.append('min_lat', params.bbox[1].toString());
+      query.append('max_lng', params.bbox[2].toString());
+      query.append('max_lat', params.bbox[3].toString());
+    }
+    const res = await fetch(`${API_BASE}/api/geo/investigation?${query.toString()}`);
+    return handleResponse<GeoInvestigationResponse>(res);
+  },
+
+  async getGeoMovements(caseId: string, entityIds?: string[]): Promise<MovementSegment[]> {
+    const query = new URLSearchParams({ case_id: caseId });
+    if (entityIds?.length) query.append('entity_ids', entityIds.join(','));
+    const res = await fetch(`${API_BASE}/api/geo/movements?${query.toString()}`);
+    return handleResponse<MovementSegment[]>(res);
+  },
+
+  async getGeoCoLocations(caseId: string): Promise<CoLocationFinding[]> {
+    const res = await fetch(`${API_BASE}/api/geo/co-locations?case_id=${encodeURIComponent(caseId)}`);
+    return handleResponse<CoLocationFinding[]>(res);
+  },
+
+  async getGeoCommonPlaces(caseId: string): Promise<CommonPlace[]> {
+    const res = await fetch(`${API_BASE}/api/geo/common-places?case_id=${encodeURIComponent(caseId)}`);
+    return handleResponse<CommonPlace[]>(res);
+  },
+
+  async postGeoAreaQuery(payload: {
+    case_id: string;
+    center_lat: number;
+    center_lng: number;
+    radius_meters?: number;
+    start_time?: string;
+    end_time?: string;
+  }): Promise<AreaInvestigationResult> {
+    const res = await fetch(`${API_BASE}/api/geo/area-query`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return handleResponse<AreaInvestigationResult>(res);
+  },
+
+  async getGeoSegmentContext(caseId: string, eventId: string, windowSeconds: number = 1800): Promise<any> {
+    const query = new URLSearchParams({
+      case_id: caseId,
+      event_id: eventId,
+      window_seconds: windowSeconds.toString()
+    });
+    const res = await fetch(`${API_BASE}/api/geo/segment-context?${query.toString()}`);
+    return handleResponse<any>(res);
+  },
+
+  async exportGeoDossier(caseId: string, format: 'geojson' | 'json' = 'geojson'): Promise<any> {
+    const res = await fetch(`${API_BASE}/api/geo/export?case_id=${encodeURIComponent(caseId)}&format=${format}`);
+    return handleResponse<any>(res);
   }
 };
+
+export const api = apiClient;
+
+// ==========================================
+// GEOSPATIAL INTELLIGENCE INTERFACES
+// ==========================================
+
+export const GeoLocationType = {
+  GPS: 'GPS',
+  CELL_TOWER: 'CELL_TOWER',
+  ATM: 'ATM',
+  BANK_BRANCH: 'BANK_BRANCH',
+  MERCHANT: 'MERCHANT',
+  SOCIAL_GEOTAG: 'SOCIAL_GEOTAG',
+  IP_GEOLOCATION: 'IP_GEOLOCATION',
+  UNKNOWN: 'UNKNOWN'
+} as const;
+
+export type GeoLocationType = (typeof GeoLocationType)[keyof typeof GeoLocationType];
+
+export interface GeoCanonicalEvent {
+  geo_event_id: string;
+  event_id: string;
+  case_id: string;
+  entity_id?: string;
+  entity_name?: string;
+  timestamp: string;
+  timestamp_ms: number;
+  raw_timestamp: string;
+  timezone_offset?: string;
+  location_type: GeoLocationType;
+  latitude: number;
+  longitude: number;
+  accuracy_radius_meters: number;
+  location_confidence: number;
+  location_name?: string;
+  address?: string;
+  cell_tower_id?: string;
+  device_id?: string;
+  domain: string;
+  event_type: string;
+  raw_evidence_id: string;
+  evidence_filename?: string;
+  evidence_sha256?: string;
+  anomaly_score: number;
+  anomaly_reasons: string[];
+  epistemic_status: string;
+  metadata: Record<string, any>;
+  created_at?: string;
+}
+
+export interface MovementSegment {
+  segment_id: string;
+  entity_id: string;
+  entity_name?: string;
+  from_event_id: string;
+  to_event_id: string;
+  start_time: string;
+  end_time: string;
+  duration_seconds: number;
+  start_coords: [number, number]; // [lng, lat]
+  end_coords: [number, number];   // [lng, lat]
+  distance_km: number;
+  speed_kmh: number;
+  is_gap: boolean;
+  gap_reason?: string;
+  path_points: [number, number][];
+}
+
+export interface CoLocationFinding {
+  co_location_id: string;
+  case_id: string;
+  co_location_type: string;
+  entity_ids: string[];
+  entity_names: string[];
+  start_time: string;
+  end_time: string;
+  duration_seconds: number;
+  latitude: number;
+  longitude: number;
+  location_name?: string;
+  cell_tower_id?: string;
+  distance_between_meters: number;
+  occurrence_count: number;
+  distinct_days_count: number;
+  correlation_score: number;
+  supporting_events: string[];
+  epistemic_note: string;
+}
+
+export interface CommonPlace {
+  place_id: string;
+  place_name: string;
+  latitude: number;
+  longitude: number;
+  location_type: GeoLocationType;
+  radius_meters: number;
+  total_visits: number;
+  unique_entities: string[];
+  unique_entity_count: number;
+  entity_visit_counts: Record<string, number>;
+  time_spans: string[];
+  dominant_domain: string;
+}
+
+export interface ActivityDensityCell {
+  cell_id: string;
+  latitude: number;
+  longitude: number;
+  event_count: number;
+  entity_count: number;
+  domains: Record<string, number>;
+}
+
+export interface SpatialStoryCard {
+  card_id: string;
+  entity_id: string;
+  entity_name?: string;
+  step_index: number;
+  timestamp: string;
+  time_range_formatted: string;
+  location_name: string;
+  coordinates: [number, number]; // [lat, lng]
+  action_summary: string;
+  distance_from_previous_km?: number;
+  travel_time_from_previous_sec?: number;
+  implied_speed_kmh?: number;
+  evidence_refs: string[];
+  anomalies: string[];
+}
+
+export interface AreaInvestigationResult {
+  center: [number, number];
+  radius_meters: number;
+  start_time?: string;
+  end_time?: string;
+  entities_present: Array<{
+    entity_id: string;
+    name: string;
+    event_count: number;
+    first_seen: string;
+    last_seen: string;
+    confidence: number;
+    primary_domains: string[];
+  }>;
+  events_inside: GeoCanonicalEvent[];
+  domain_distribution: Record<string, number>;
+  total_events: number;
+  total_entities: number;
+}
+
+export interface GeoInvestigationResponse {
+  case_id: string;
+  total_events: number;
+  events: GeoCanonicalEvent[];
+  movements: MovementSegment[];
+  co_locations: CoLocationFinding[];
+  common_places: CommonPlace[];
+  density_grid: ActivityDensityCell[];
+  story_cards: SpatialStoryCard[];
+  summary_metrics: Record<string, any>;
+}
+

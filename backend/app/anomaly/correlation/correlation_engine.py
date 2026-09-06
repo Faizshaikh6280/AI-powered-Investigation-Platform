@@ -97,11 +97,13 @@ class SignalCorrelationEngine:
 
     CORE_DETECTORS = {
         "DET-FIN-COORDINATED-FLOW",
+        "DET-FIN-HIGH-VALUE-BURST",
         "DET-SPATIAL-CONVERGENCE",
         "DET-COMM-SYNC-EPISODE",
         "DET-SOC-INFRA",
         "DET-ID-DISCREPANCY",
-        "DET-CROSS-COLLISION"
+        "DET-CROSS-COLLISION",
+        "DET-GEO-TRAJECTORY"
     }
 
     def correlate(
@@ -120,7 +122,9 @@ class SignalCorrelationEngine:
         # Sort signals so core anchor patterns are considered as anchors first
         priority_map = {
             "DET-FIN-COORDINATED-FLOW": 100,
+            "DET-FIN-HIGH-VALUE-BURST": 98,
             "DET-SPATIAL-CONVERGENCE": 95,
+            "DET-GEO-TRAJECTORY": 92,
             "DET-COMM-SYNC-EPISODE": 90,
             "DET-SOC-INFRA": 85,
             "DET-ID-DISCREPANCY": 80,
@@ -201,6 +205,8 @@ class SignalCorrelationEngine:
                 return (True, "Consolidated shared digital infrastructure co-occurrence across entities.")
             elif signal.detector_id == "DET-FIN-COORDINATED-FLOW":
                 return (True, "Consolidated coordinated circular financial flow across network accounts.")
+            elif signal.detector_id == "DET-FIN-HIGH-VALUE-BURST":
+                return (True, "Consolidated high-value transaction burst across entities.")
             elif signal.detector_id == "DET-COMM-SYNC-EPISODE":
                 return (True, "Consolidated synchronized multi-party communication episode.")
             elif signal.detector_id == "DET-CROSS-COLLISION":
@@ -209,6 +215,11 @@ class SignalCorrelationEngine:
                 common_ents = set(signal.entity_refs).intersection(group.entities)
                 if common_ents:
                     return (True, "Consolidated device/identity discrepancy on entity.")
+                return (False, "")
+            elif signal.detector_id == "DET-GEO-TRAJECTORY":
+                common_ents = set(signal.entity_refs).intersection(group.entities)
+                if common_ents:
+                    return (True, "Consolidated progressive multi-location trajectory route on entity.")
                 return (False, "")
 
         # 2. Core Signal arriving at Generic Group:

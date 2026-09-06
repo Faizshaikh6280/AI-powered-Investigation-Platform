@@ -1,4 +1,5 @@
 import os
+os.environ["AWS_EC2_METADATA_DISABLED"] = "true"
 import io
 import hashlib
 import logging
@@ -31,7 +32,14 @@ class StorageService:
             endpoint_url=self.endpoint_url,
             aws_access_key_id=settings.MINIO_ACCESS_KEY,
             aws_secret_access_key=settings.MINIO_SECRET_KEY,
-            config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+            config=Config(
+                signature_version="s3v4",
+                s3={"addressing_style": "path"},
+                connect_timeout=10,
+                read_timeout=60,
+                max_pool_connections=50,
+                retries={'max_attempts': 3, 'mode': 'standard'}
+            ),
             region_name="us-east-1"
         )
 
@@ -40,6 +48,21 @@ class StorageService:
         if len(master_key_bytes) != 32:
             master_key_bytes = hashlib.sha256(settings.ENCRYPTION_MASTER_KEY.encode()).digest()
         self.aes_key = master_key_bytes
+        self._storage_status_cache = {"available": None, "last_check": 0.0}
+
+    def is_storage_available(self) -> bool:
+        """Fast circuit breaker checking if MinIO S3 endpoint is reachable (cached for 30s)."""
+        import time
+        now = time.time()
+        if self._storage_status_cache["available"] is not None and (now - self._storage_status_cache["last_check"]) < 30.0:
+            return self._storage_status_cache["available"]
+        try:
+            self.s3_client.list_buckets()
+            self._storage_status_cache["available"] = True
+        except Exception:
+            self._storage_status_cache["available"] = False
+        self._storage_status_cache["last_check"] = now
+        return self._storage_status_cache["available"]
 
     def ensure_buckets(self):
         """Ensure required buckets exist with bucket versioning enabled for immutability."""

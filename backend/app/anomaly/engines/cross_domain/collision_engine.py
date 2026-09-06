@@ -50,37 +50,51 @@ class CrossDomainCollisionEngine(BaseDetector):
                 not_applicable_reason="Requires events in at least two distinct operational domains (Financial + Telemetry/Network)."
             )
 
+        import bisect
+        parsed_comm = []
+        for c in comm_evs:
+            c_ts_str = c.get("timestamp")
+            if not c_ts_str:
+                continue
+            try:
+                c_sec = datetime.fromisoformat(c_ts_str.replace("Z", "+00:00")).timestamp()
+                parsed_comm.append((c_sec, c))
+            except Exception:
+                pass
+        parsed_comm.sort(key=lambda x: x[0])
+        comm_secs = [x[0] for x in parsed_comm]
+
         collisions = []
         for b in bank_evs:
             b_ts_str = b.get("timestamp")
             if not b_ts_str:
                 continue
-            b_dt = datetime.fromisoformat(b_ts_str.replace("Z", "+00:00"))
+            try:
+                b_sec = datetime.fromisoformat(b_ts_str.replace("Z", "+00:00")).timestamp()
+            except Exception:
+                continue
             b_amt = float(b.get("financial", {}).get("amount_inr", 0.0) or b.get("attributes", {}).get("amount", 0.0))
 
-            for c in comm_evs:
-                c_ts_str = c.get("timestamp")
-                if not c_ts_str:
-                    continue
-                c_dt = datetime.fromisoformat(c_ts_str.replace("Z", "+00:00"))
-                delta_min = abs((c_dt - b_dt).total_seconds()) / 60.0
+            left_idx = bisect.bisect_left(comm_secs, b_sec - 1800.0)
+            right_idx = bisect.bisect_right(comm_secs, b_sec + 1800.0)
 
-                # Collision within 30 minutes
-                if delta_min <= 30.0:
-                    c_domain = c.get("domain") or c.get("source_type")
-                    c_ip = c.get("telemetry", {}).get("assigned_ip") or c.get("attributes", {}).get("client_ip")
-                    c_tower = c.get("telemetry", {}).get("cell_tower_id") or c.get("attributes", {}).get("tower_address")
+            for i in range(left_idx, right_idx):
+                c_sec, c = parsed_comm[i]
+                delta_min = abs(c_sec - b_sec) / 60.0
+                c_domain = c.get("domain") or c.get("source_type")
+                c_ip = c.get("telemetry", {}).get("assigned_ip") or c.get("attributes", {}).get("client_ip")
+                c_tower = c.get("telemetry", {}).get("cell_tower_id") or c.get("attributes", {}).get("tower_address")
 
-                    collisions.append({
-                        "financial_event": b.get("event_id"),
-                        "amount_inr": b_amt,
-                        "comm_event": c.get("event_id"),
-                        "comm_domain": c_domain,
-                        "delta_minutes": round(delta_min, 1),
-                        "ip": c_ip,
-                        "tower": c_tower,
-                        "timestamp": b_ts_str
-                    })
+                collisions.append({
+                    "financial_event": b.get("event_id"),
+                    "amount_inr": b_amt,
+                    "comm_event": c.get("event_id"),
+                    "comm_domain": c_domain,
+                    "delta_minutes": round(delta_min, 1),
+                    "ip": c_ip,
+                    "tower": c_tower,
+                    "timestamp": b_ts_str
+                })
 
         if not collisions:
             return DetectorExecutionResult(

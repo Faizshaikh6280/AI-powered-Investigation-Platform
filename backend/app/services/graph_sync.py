@@ -7,7 +7,7 @@ from app.processing.canonical_reader import canonical_reader
 
 logger = logging.getLogger("investigation.graph_sync")
 
-async def sync_mongo_to_neo4j(case_id: Optional[str] = None):
+def sync_mongo_to_neo4j(case_id: Optional[str] = None):
     """
     Synchronizes canonical events and resolved golden profiles for the given case into Neo4j property graph.
     Data source:
@@ -27,111 +27,116 @@ async def sync_mongo_to_neo4j(case_id: Optional[str] = None):
             target_case_id = c.case_id
 
     with neo4j_client.driver.session() as session:
-        # ── 1. Create Constraints (Idempotent) ───────────────────────
-        for cypher in [
-            "CREATE CONSTRAINT IF NOT EXISTS FOR (p:Person) REQUIRE p.golden_id IS UNIQUE",
-            "CREATE CONSTRAINT IF NOT EXISTS FOR (ph:Phone) REQUIRE ph.number IS UNIQUE",
-            "CREATE CONSTRAINT IF NOT EXISTS FOR (b:BankAccount) REQUIRE b.account_number IS UNIQUE",
-            "CREATE CONSTRAINT IF NOT EXISTS FOR (i:IPAddress) REQUIRE i.address IS UNIQUE",
-            "CREATE CONSTRAINT IF NOT EXISTS FOR (d:IMEI) REQUIRE d.imei_number IS UNIQUE",
-            "CREATE CONSTRAINT IF NOT EXISTS FOR (t:CellTower) REQUIRE t.tower_id IS UNIQUE",
-            "CREATE CONSTRAINT IF NOT EXISTS FOR (s:SocialAccount) REQUIRE s.handle IS UNIQUE",
-            "CREATE CONSTRAINT IF NOT EXISTS FOR (a:ATM) REQUIRE a.atm_id IS UNIQUE",
-        ]:
-            try:
-                session.run(cypher)
-            except Exception:
-                pass
-
-        # ── 2. Sync Golden Person Nodes from PostgreSQL ──────────────
+        # ── 1. Sync Golden Person Nodes from PostgreSQL ──────────────
         with get_db_context() as db:
             profiles = db.query(GoldenProfileModel).filter(GoldenProfileModel.case_id == target_case_id).all()
 
             profile_dicts = [{
                 "z_cluster_id": p.z_cluster_id,
-                "primary_name": p.primary_name,
-                "risk_score": p.risk_score,
-                "known_aliases": p.known_aliases or [],
-                "known_phones": p.known_phones or [],
-                "associated_emails": p.associated_emails or [],
-                "known_addresses": p.known_addresses or [],
+                "primary_name": p.primary_name or "Unknown",
+                "risk_score": p.risk_score or 0.0,
+                "aliases": p.known_aliases or [],
+                "phones": p.known_phones or [],
+                "emails": p.associated_emails or [],
+                "addresses": p.known_addresses or [],
                 "national_ids": p.national_ids or [],
-                "known_accounts": p.known_accounts or [],
+                "accounts": p.known_accounts or [],
                 "social_handles": p.social_handles or [],
-                "method": p.method,
-                "last_updated": p.last_updated.isoformat() if p.last_updated else ""
+                "method": p.method or "deterministic",
+                "last_updated": p.last_updated.isoformat() if p.last_updated else "",
+                "case_id": target_case_id
             } for p in profiles]
 
-        for p in profile_dicts:
-            cluster_id = p["z_cluster_id"]
-            session.run("""
-                MERGE (person:Person {golden_id: $cluster_id})
-                SET person.name        = $primary_name,
-                    person.case_id     = $case_id,
-                    person.risk_score  = $risk_score,
-                    person.aliases     = $aliases,
-                    person.phones      = $phones,
-                    person.emails      = $emails,
-                    person.addresses   = $addresses,
-                    person.national_ids= $national_ids,
-                    person.method      = $method,
-                    person.last_updated= $last_updated
-            """, {
-                "cluster_id"  : cluster_id,
-                "case_id"     : target_case_id,
-                "primary_name": p.get("primary_name", "Unknown"),
-                "risk_score"  : p.get("risk_score", 0.0),
-                "aliases"     : p.get("known_aliases", []),
-                "phones"      : p.get("known_phones", []),
-                "emails"      : p.get("associated_emails", []),
-                "addresses"   : p.get("known_addresses", []),
-                "national_ids": p.get("national_ids", []),
-                "method"      : p.get("method", "deterministic"),
-                "last_updated": p.get("last_updated", ""),
-            })
+        def run_batched(query: str, items: list, chunk_size: int = 500):
+            if not items:
+                return
+            for i in range(0, len(items), chunk_size):
+                chunk = items[i:i + chunk_size]
+                res = session.run(query, {"batch": chunk})
+                res.consume()
 
-            # Phone nodes and OWNS_PHONE relationships
-            for phone in p.get("known_phones", []):
-                if phone and str(phone).lower() not in ("nan", "none", ""):
-                    session.run("""
-                        MERGE (ph:Phone {number: $phone})
-                        SET ph.case_id = $case_id
-                        MERGE (p:Person {golden_id: $cluster_id})
-                        MERGE (p)-[r:OWNS_PHONE]->(ph)
-                        SET r.case_id = $case_id
-                    """, {"cluster_id": cluster_id, "phone": str(phone).strip(), "case_id": target_case_id})
+        if profile_dicts:
+            run_batched("""
+                UNWIND $batch AS p
+                MERGE (person:Person {golden_id: p.z_cluster_id})
+                SET person.name        = p.primary_name,
+                    person.case_id     = p.case_id,
+                    person.risk_score  = p.risk_score,
+                    person.aliases     = p.aliases,
+                    person.phones      = p.phones,
+                    person.emails      = p.emails,
+                    person.addresses   = p.addresses,
+                    person.national_ids= p.national_ids,
+                    person.method      = p.method,
+                    person.last_updated= p.last_updated
+            """, profile_dicts)
 
-            # Bank Account nodes and OWNS_ACCOUNT relationships
-            for acc in p.get("known_accounts", []):
-                if acc and str(acc).lower() not in ("nan", "none", ""):
-                    session.run("""
-                        MERGE (ba:BankAccount {account_number: $acc})
-                        SET ba.holder = $name, ba.case_id = $case_id
-                        MERGE (p:Person {golden_id: $cluster_id})
-                        MERGE (p)-[r:OWNS_ACCOUNT]->(ba)
-                        SET r.case_id = $case_id
-                    """, {"cluster_id": cluster_id, "acc": str(acc).strip(), "name": p.get("primary_name"), "case_id": target_case_id})
+            owns_phone_batch = []
+            owns_acc_batch = []
+            uses_handle_batch = []
+            for p in profile_dicts:
+                cid = p["z_cluster_id"]
+                for ph in p.get("phones", []):
+                    if ph and str(ph).lower() not in ("nan", "none", ""):
+                        owns_phone_batch.append({"cluster_id": cid, "phone": str(ph).strip(), "case_id": target_case_id})
+                for acc in p.get("accounts", []):
+                    if acc and str(acc).lower() not in ("nan", "none", ""):
+                        owns_acc_batch.append({"cluster_id": cid, "acc": str(acc).strip(), "name": p.get("primary_name"), "case_id": target_case_id})
+                for sh in p.get("social_handles", []):
+                    handle = sh.get("handle") if isinstance(sh, dict) else str(sh)
+                    platform = sh.get("platform", "Web") if isinstance(sh, dict) else "Web"
+                    if handle:
+                        uses_handle_batch.append({"cluster_id": cid, "handle": str(handle).strip(), "platform": platform, "case_id": target_case_id})
 
-            # Social Account nodes and USES_HANDLE relationships
-            for sh in p.get("social_handles", []):
-                handle = sh.get("handle", "")
-                platform = sh.get("platform", "")
-                if handle:
-                    session.run("""
-                        MERGE (s:SocialAccount {handle: $handle})
-                        SET s.platform = $platform, s.case_id = $case_id
-                        MERGE (p:Person {golden_id: $cluster_id})
-                        MERGE (p)-[r:USES_HANDLE]->(s)
-                        SET r.case_id = $case_id
-                    """, {"cluster_id": cluster_id, "handle": str(handle).strip(), "platform": platform, "case_id": target_case_id})
+            if owns_phone_batch:
+                run_batched("""
+                    UNWIND $batch AS row
+                    MERGE (ph:Phone {number: row.phone})
+                    SET ph.case_id = row.case_id
+                    MERGE (p:Person {golden_id: row.cluster_id})
+                    MERGE (p)-[r:OWNS_PHONE]->(ph)
+                    SET r.case_id = row.case_id
+                """, owns_phone_batch)
 
-        # ── 3. Sync Operational Telemetry & Transactions from MinIO Parquet Warehouse ──
-        events = canonical_reader.read_all_events(case_id=target_case_id)
+            if owns_acc_batch:
+                run_batched("""
+                    UNWIND $batch AS row
+                    MERGE (ba:BankAccount {account_number: row.acc})
+                    SET ba.holder = row.name, ba.case_id = row.case_id
+                    MERGE (p:Person {golden_id: row.cluster_id})
+                    MERGE (p)-[r:OWNS_ACCOUNT]->(ba)
+                    SET r.case_id = row.case_id
+                """, owns_acc_batch)
+
+            if uses_handle_batch:
+                run_batched("""
+                    UNWIND $batch AS row
+                    MERGE (s:SocialAccount {handle: row.handle})
+                    SET s.platform = row.platform, s.case_id = row.case_id
+                    MERGE (p:Person {golden_id: row.cluster_id})
+                    MERGE (p)-[r:USES_HANDLE]->(s)
+                    SET r.case_id = row.case_id
+                """, uses_handle_batch)
+
+        # ── 3. Sync Operational Telemetry & Transactions in Batches ──
+        events = canonical_reader.iter_all_events(case_id=target_case_id, limit=3000)
+        event_count = 0
 
         def is_empty(val):
             return not val or str(val).lower() in ("nan", "none", "")
 
+        # Use high-performance aggregated edge maps to ensure O(distinct_pairs) graph writes
+        used_device_map = {}
+        pinged_tower_map = {}
+        assigned_ip_map = {}
+        social_ip_map = {}
+        person_ip_map = {}
+        transacted_map = {}
+        cashout_map = {}
+        called_map = {}
+
         for ev in events:
+            event_count += 1
             cluster_id = ev.get("z_cluster_id")
             telemetry = ev.get("telemetry", {})
             financial = ev.get("financial", {})
@@ -140,144 +145,242 @@ async def sync_mongo_to_neo4j(case_id: Optional[str] = None):
             phone = identity.get("phone")
 
             # IMEI → Phone (USED_DEVICE)
-            imei = telemetry.get("imei")
+            imei = telemetry.get("imei") or ev.get("attributes", {}).get("imei")
             if not is_empty(imei) and not is_empty(phone):
-                session.run("""
-                    MERGE (ph:Phone {number: $phone})
-                    SET ph.case_id = $case_id
-                    MERGE (i:IMEI {imei_number: $imei})
-                    SET i.case_id = $case_id
-                    MERGE (ph)-[r:USED_DEVICE]->(i)
-                    SET r.last_seen = $timestamp, r.case_id = $case_id
-                """, {"phone": phone, "imei": str(imei), "timestamp": timestamp, "case_id": target_case_id})
+                k = (str(phone).strip(), str(imei).strip())
+                if k not in used_device_map or timestamp > used_device_map[k]["last_seen"]:
+                    used_device_map[k] = {
+                        "phone": k[0],
+                        "imei": k[1],
+                        "last_seen": timestamp,
+                        "case_id": target_case_id
+                    }
 
             # CellTower → Phone (PINGED_TOWER)
-            tower = telemetry.get("cell_tower_id")
+            tower = telemetry.get("cell_tower_id") or ev.get("attributes", {}).get("cell_id")
             if not is_empty(tower) and not is_empty(phone):
-                session.run("""
-                    MERGE (t:CellTower {tower_id: $tower})
-                    SET t.lat     = $lat,
-                        t.lng     = $lng,
-                        t.address = $address,
-                        t.case_id = $case_id
-                    MERGE (ph:Phone {number: $phone})
-                    SET ph.case_id = $case_id
-                    MERGE (ph)-[r:PINGED_TOWER]->(t)
-                    SET r.last_seen = $timestamp,
-                        r.duration  = $duration,
-                        r.case_id   = $case_id
-                """, {
-                    "tower": str(tower),
-                    "lat": telemetry.get("lat"),
-                    "lng": telemetry.get("lng"),
-                    "address": telemetry.get("address", ""),
-                    "phone": phone,
-                    "timestamp": timestamp,
-                    "duration": telemetry.get("duration_seconds", ""),
-                    "case_id": target_case_id
-                })
+                k = (str(phone).strip(), str(tower).strip())
+                dur = float(telemetry.get("duration_seconds") or 0)
+                if k not in pinged_tower_map:
+                    pinged_tower_map[k] = {
+                        "phone": k[0],
+                        "tower": k[1],
+                        "lat": telemetry.get("lat"),
+                        "lng": telemetry.get("lng"),
+                        "address": telemetry.get("address", "") or "",
+                        "duration": dur,
+                        "pings_count": 1,
+                        "last_seen": timestamp,
+                        "case_id": target_case_id
+                    }
+                else:
+                    pinged_tower_map[k]["duration"] += dur
+                    pinged_tower_map[k]["pings_count"] += 1
+                    if timestamp > pinged_tower_map[k]["last_seen"]:
+                        pinged_tower_map[k]["last_seen"] = timestamp
 
             # Logical IP Routing based on Domain
-            ip = telemetry.get("assigned_ip")
+            ip = telemetry.get("assigned_ip") or ev.get("attributes", {}).get("ip") or ev.get("attributes", {}).get("destination_ip")
             domain = ev.get("domain") or ev.get("source_type")
 
             if not is_empty(ip):
-                session.run("MERGE (i:IPAddress {address: $ip}) SET i.case_id = $case_id", {"ip": str(ip), "case_id": target_case_id})
-
+                ip_str = str(ip).strip()
                 if domain == "NETWORK" and not is_empty(phone):
-                    session.run("""
-                        MERGE (i:IPAddress {address: $ip})
-                        SET i.case_id = $case_id
-                        MERGE (ph:Phone {number: $phone})
-                        SET ph.case_id = $case_id
-                        MERGE (ph)-[r:ASSIGNED_IP]->(i)
-                        SET r.last_seen = $timestamp, r.case_id = $case_id
-                    """, {"ip": str(ip), "phone": phone, "timestamp": timestamp, "case_id": target_case_id})
-
+                    k = (str(phone).strip(), ip_str)
+                    if k not in assigned_ip_map or timestamp > assigned_ip_map[k]["last_seen"]:
+                        assigned_ip_map[k] = {
+                            "phone": k[0],
+                            "ip": k[1],
+                            "last_seen": timestamp,
+                            "case_id": target_case_id
+                        }
                 elif domain == "SOCIAL" and not is_empty(identity.get("social_handle")):
-                    handle = identity.get("social_handle")
-                    platform = identity.get("social_platform", "")
-                    session.run("""
-                        MERGE (i:IPAddress {address: $ip})
-                        SET i.case_id = $case_id
-                        MERGE (s:SocialAccount {handle: $handle})
-                        SET s.platform = $platform, s.case_id = $case_id
-                        MERGE (s)-[r:LOGGED_IN_FROM]->(i)
-                        SET r.last_seen = $timestamp, r.case_id = $case_id
-                    """, {"ip": str(ip), "handle": str(handle), "platform": platform, "timestamp": timestamp, "case_id": target_case_id})
-
+                    k = (str(identity["social_handle"]).strip(), ip_str)
+                    if k not in social_ip_map or timestamp > social_ip_map[k]["last_seen"]:
+                        social_ip_map[k] = {
+                            "handle": k[0],
+                            "ip": k[1],
+                            "platform": identity.get("social_platform", "Social"),
+                            "last_seen": timestamp,
+                            "case_id": target_case_id
+                        }
                 elif cluster_id:
-                    session.run("""
-                        MERGE (i:IPAddress {address: $ip})
-                        SET i.case_id = $case_id
-                        MERGE (p:Person {golden_id: $cluster_id})
-                        SET p.case_id = $case_id
-                        MERGE (p)-[r:LOGGED_IN_FROM]->(i)
-                        SET r.last_seen = $timestamp, r.case_id = $case_id
-                    """, {"cluster_id": cluster_id, "ip": str(ip), "timestamp": timestamp, "case_id": target_case_id})
+                    k = (cluster_id, ip_str)
+                    if k not in person_ip_map or timestamp > person_ip_map[k]["last_seen"]:
+                        person_ip_map[k] = {
+                            "cluster_id": k[0],
+                            "ip": k[1],
+                            "last_seen": timestamp,
+                            "case_id": target_case_id
+                        }
 
             # Financial Transactions between Bank Accounts (TRANSACTED_WITH)
-            acc = financial.get("account_number")
-            cp_acc = financial.get("counterparty")
+            acc = financial.get("account_number") or ev.get("attributes", {}).get("from_account")
+            cp_acc = financial.get("counterparty") or ev.get("attributes", {}).get("to_account")
             if not is_empty(acc) and not is_empty(cp_acc):
-                session.run("""
-                    MERGE (ba:BankAccount {account_number: $acc})
-                    SET ba.case_id = $case_id
-                    MERGE (cp:BankAccount {account_number: $cp})
-                    SET cp.case_id = $case_id
-                    MERGE (ba)-[r:TRANSACTED_WITH]->(cp)
-                    SET r.amount = $amount,
-                        r.txn_type = $txn_type,
-                        r.timestamp = $timestamp,
-                        r.channel = $channel,
-                        r.case_id = $case_id
-                """, {
-                    "acc": str(acc),
-                    "cp": str(cp_acc),
-                    "amount": financial.get("amount_inr", 0.0),
-                    "txn_type": financial.get("txn_type", "TRANSFER"),
-                    "timestamp": timestamp,
-                    "channel": financial.get("channel", "TRANSFER"),
-                    "case_id": target_case_id
-                })
+                k = (str(acc).strip(), str(cp_acc).strip())
+                amt = float(financial.get("amount_inr") or ev.get("attributes", {}).get("amount") or 0.0)
+                if k not in transacted_map:
+                    transacted_map[k] = {
+                        "acc": k[0],
+                        "cp": k[1],
+                        "total_amount": amt,
+                        "txn_count": 1,
+                        "txn_type": financial.get("txn_type") or ev.get("attributes", {}).get("channel") or "TRANSFER",
+                        "channel": financial.get("channel") or ev.get("attributes", {}).get("channel") or "TRANSFER",
+                        "last_seen": timestamp,
+                        "case_id": target_case_id
+                    }
+                else:
+                    transacted_map[k]["total_amount"] += amt
+                    transacted_map[k]["txn_count"] += 1
+                    if timestamp > transacted_map[k]["last_seen"]:
+                        transacted_map[k]["last_seen"] = timestamp
 
             # ATM Cashout (WITHDREW_CASH_AT)
             atm_id = ev.get("attributes", {}).get("atm_id")
             if not is_empty(acc) and not is_empty(atm_id):
-                session.run("""
-                    MERGE (ba:BankAccount {account_number: $acc})
-                    SET ba.case_id = $case_id
-                    MERGE (atm:ATM {atm_id: $atm_id})
-                    SET atm.location = $loc, atm.case_id = $case_id
-                    MERGE (ba)-[r:WITHDREW_CASH_AT]->(atm)
-                    SET r.amount = $amount, r.timestamp = $timestamp, r.case_id = $case_id
-                """, {
-                    "acc": str(acc),
-                    "atm_id": str(atm_id),
-                    "loc": telemetry.get("address") or ev.get("attributes", {}).get("location", ""),
-                    "amount": financial.get("amount_inr", 0.0),
-                    "timestamp": timestamp,
-                    "case_id": target_case_id
-                })
+                k = (str(acc).strip(), str(atm_id).strip())
+                amt = float(financial.get("amount_inr", 0.0) or 0.0)
+                if k not in cashout_map:
+                    cashout_map[k] = {
+                        "acc": k[0],
+                        "atm_id": k[1],
+                        "loc": telemetry.get("address") or ev.get("attributes", {}).get("location", ""),
+                        "total_amount": amt,
+                        "cashout_count": 1,
+                        "last_seen": timestamp,
+                        "case_id": target_case_id
+                    }
+                else:
+                    cashout_map[k]["total_amount"] += amt
+                    cashout_map[k]["cashout_count"] += 1
+                    if timestamp > cashout_map[k]["last_seen"]:
+                        cashout_map[k]["last_seen"] = timestamp
 
             # Telecom Calls: (caller:Phone)-[:CALLED]->(callee:Phone)
-            called_number = ev.get("attributes", {}).get("called_number") or ev.get("normalized_identity", {}).get("counterparty_name")
+            called_number = ev.get("attributes", {}).get("called_number") or ev.get("attributes", {}).get("callee") or ev.get("normalized_identity", {}).get("counterparty_name")
             if (ev.get("event_type") == "CALL" or domain == "TELECOM") and not is_empty(phone) and not is_empty(called_number):
-                session.run("""
-                    MERGE (caller:Phone {number: $caller})
-                    SET caller.case_id = $case_id
-                    MERGE (callee:Phone {number: $callee})
-                    SET callee.case_id = $case_id
-                    MERGE (caller)-[r:CALLED]->(callee)
-                    SET r.duration = $duration, r.timestamp = $timestamp, r.case_id = $case_id
-                """, {
-                    "caller": str(phone).strip(),
-                    "callee": str(called_number).strip(),
-                    "duration": telemetry.get("duration_seconds", 0),
-                    "timestamp": timestamp,
-                    "case_id": target_case_id
-                })
+                k = (str(phone).strip(), str(called_number).strip())
+                dur = float(telemetry.get("duration_seconds", 0) or 0)
+                if k not in called_map:
+                    called_map[k] = {
+                        "caller": k[0],
+                        "callee": k[1],
+                        "total_duration": dur,
+                        "call_count": 1,
+                        "last_seen": timestamp,
+                        "case_id": target_case_id
+                    }
+                else:
+                    called_map[k]["total_duration"] += dur
+                    called_map[k]["call_count"] += 1
+                    if timestamp > called_map[k]["last_seen"]:
+                        called_map[k]["last_seen"] = timestamp
 
-        logger.info(f"[GraphSync] Synced {len(profile_dicts)} Golden Persons and {len(events)} events to Neo4j for Case {target_case_id}.")
+        # Execute Batched Synced Edges (O(unique_pairs), runs in milliseconds)
+        if used_device_map:
+            run_batched("""
+                UNWIND $batch AS row
+                MERGE (ph:Phone {number: row.phone})
+                SET ph.case_id = row.case_id
+                MERGE (i:IMEI {imei_number: row.imei})
+                SET i.case_id = row.case_id
+                MERGE (ph)-[r:USED_DEVICE]->(i)
+                SET r.last_seen = row.last_seen, r.case_id = row.case_id
+            """, list(used_device_map.values()))
+
+        if pinged_tower_map:
+            run_batched("""
+                UNWIND $batch AS row
+                MERGE (t:CellTower {tower_id: row.tower})
+                SET t.lat = row.lat, t.lng = row.lng, t.address = row.address, t.case_id = row.case_id
+                MERGE (ph:Phone {number: row.phone})
+                SET ph.case_id = row.case_id
+                MERGE (ph)-[r:PINGED_TOWER]->(t)
+                SET r.last_seen = row.last_seen, r.duration = row.duration, r.pings_count = row.pings_count, r.case_id = row.case_id
+            """, list(pinged_tower_map.values()))
+
+        if assigned_ip_map:
+            run_batched("""
+                UNWIND $batch AS row
+                MERGE (i:IPAddress {address: row.ip})
+                SET i.case_id = row.case_id
+                MERGE (ph:Phone {number: row.phone})
+                SET ph.case_id = row.case_id
+                MERGE (ph)-[r:ASSIGNED_IP]->(i)
+                SET r.last_seen = row.last_seen, r.case_id = row.case_id
+            """, list(assigned_ip_map.values()))
+
+        if social_ip_map:
+            run_batched("""
+                UNWIND $batch AS row
+                MERGE (i:IPAddress {address: row.ip})
+                SET i.case_id = row.case_id
+                MERGE (s:SocialAccount {handle: row.handle})
+                SET s.platform = row.platform, s.case_id = row.case_id
+                MERGE (s)-[r:LOGGED_IN_FROM]->(i)
+                SET r.last_seen = row.last_seen, r.case_id = row.case_id
+            """, list(social_ip_map.values()))
+
+        if person_ip_map:
+            run_batched("""
+                UNWIND $batch AS row
+                MERGE (i:IPAddress {address: row.ip})
+                SET i.case_id = row.case_id
+                MERGE (p:Person {golden_id: row.cluster_id})
+                SET p.case_id = row.case_id
+                MERGE (p)-[r:LOGGED_IN_FROM]->(i)
+                SET r.last_seen = row.last_seen, r.case_id = row.case_id
+            """, list(person_ip_map.values()))
+
+        if transacted_map:
+            run_batched("""
+                UNWIND $batch AS row
+                MERGE (ba:BankAccount {account_number: row.acc})
+                SET ba.case_id = row.case_id
+                MERGE (cp:BankAccount {account_number: row.cp})
+                SET cp.case_id = row.case_id
+                MERGE (ba)-[r:TRANSACTED_WITH]->(cp)
+                SET r.amount = row.total_amount,
+                    r.total_amount = row.total_amount,
+                    r.txn_count = row.txn_count,
+                    r.txn_type = row.txn_type,
+                    r.timestamp = row.last_seen,
+                    r.channel = row.channel,
+                    r.case_id = row.case_id
+            """, list(transacted_map.values()))
+
+        if cashout_map:
+            run_batched("""
+                UNWIND $batch AS row
+                MERGE (ba:BankAccount {account_number: row.acc})
+                SET ba.case_id = row.case_id
+                MERGE (atm:ATM {atm_id: row.atm_id})
+                SET atm.location = row.loc, atm.case_id = row.case_id
+                MERGE (ba)-[r:WITHDREW_CASH_AT]->(atm)
+                SET r.amount = row.total_amount,
+                    r.total_amount = row.total_amount,
+                    r.cashout_count = row.cashout_count,
+                    r.timestamp = row.last_seen,
+                    r.case_id = row.case_id
+            """, list(cashout_map.values()))
+
+        if called_map:
+            run_batched("""
+                UNWIND $batch AS row
+                MERGE (caller:Phone {number: row.caller})
+                SET caller.case_id = row.case_id
+                MERGE (callee:Phone {number: row.callee})
+                SET callee.case_id = row.case_id
+                MERGE (caller)-[r:CALLED]->(callee)
+                SET r.duration = row.total_duration,
+                    r.total_duration = row.total_duration,
+                    r.call_count = row.call_count,
+                    r.timestamp = row.last_seen,
+                    r.case_id = row.case_id
+            """, list(called_map.values()))
+
+        logger.info(f"[GraphSync] Batched Synced {len(profile_dicts)} Golden Persons and {event_count} events to Neo4j for Case {target_case_id}.")
 
     return {"status": "success", "message": f"Graph sync completed successfully for Case {target_case_id}"}

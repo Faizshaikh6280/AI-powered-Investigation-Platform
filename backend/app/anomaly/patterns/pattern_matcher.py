@@ -91,11 +91,13 @@ class PatternMatcher:
 
         CORE_DETECTOR_IDS = {
             "DET-FIN-COORDINATED-FLOW",
+            "DET-FIN-HIGH-VALUE-BURST",
             "DET-COMM-SYNC-EPISODE",
             "DET-SPATIAL-CONVERGENCE",
             "DET-SOC-INFRA",
             "DET-CROSS-COLLISION",
-            "DET-ID-DISCREPANCY"
+            "DET-ID-DISCREPANCY",
+            "DET-GEO-TRAJECTORY"
         }
         if group.primary_signal.detector_id in CORE_DETECTOR_IDS:
             core_det_id = group.primary_signal.detector_id

@@ -18,7 +18,8 @@ class FeatureFactory:
 
     def build_entity_feature_store(
         self,
-        case_id: Optional[str] = None
+        case_id: Optional[str] = None,
+        events: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Dict[str, Any]]:
         """
         Groups all canonical events by resolved entity cluster or primary anchor,
@@ -36,9 +37,8 @@ class FeatureFactory:
                 "event_ids": [...]
             }
         """
-        events = canonical_reader.read_all_events(case_id=case_id)
-        if not events:
-            return {}
+        if events is None:
+            events = canonical_reader.iter_all_events(case_id=case_id, limit=5000)
 
         # Preload Golden Profiles for instant identity resolution across all anchors
         profile_map: Dict[str, Dict[str, Any]] = {}
@@ -105,8 +105,11 @@ class FeatureFactory:
             elif name and str(name).lower() in profile_map:
                 resolved_cid = profile_map[str(name).lower()]["z_cluster_id"]
 
-            entity_key = resolved_cid or cluster_id or phone or account or handle or ev.get("event_id")
-            entity_events[str(entity_key)].append(ev)
+            imei = ev.get("telemetry", {}).get("imei") or attrs.get("imei")
+            entity_key = resolved_cid or cluster_id or phone or account or handle or imei
+            if not entity_key or str(entity_key).strip() in ("", "nan", "none", "None"):
+                continue
+            entity_events[str(entity_key).strip()].append(ev)
 
         entity_store: Dict[str, Dict[str, Any]] = {}
 

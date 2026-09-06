@@ -174,6 +174,12 @@ class SparkIcebergPipeline:
             ContentType="application/octet-stream"
         )
 
+        try:
+            from app.processing.canonical_reader import canonical_reader
+            canonical_reader.invalidate_cache(case_id)
+        except Exception:
+            pass
+
         logger.info(f"[Pipeline] Successfully wrote {len(events)} canonical events to MinIO: {s3_key}")
         return s3_key
 

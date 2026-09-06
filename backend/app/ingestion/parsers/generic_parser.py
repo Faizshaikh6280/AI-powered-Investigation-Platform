@@ -73,6 +73,8 @@ class GenericTabularParser(BaseParser):
             addr = None
             cell_id = None
             timestamp = None
+            imei = None
+            device_id = None
 
             for k, v in row.items():
                 if v is None:
@@ -96,6 +98,10 @@ class GenericTabularParser(BaseParser):
                     lng = self.parse_float(vs)
                 elif not cell_id and any(x in kl for x in ("cell_id", "cell_tower_id", "tower_id", "tower", "sector_id")):
                     cell_id = vs
+                elif not imei and any(x in kl for x in ("imei", "handset", "device_imei")):
+                    imei = vs
+                elif not device_id and any(x in kl for x in ("device_id", "hardware_id", "handset_id")):
+                    device_id = vs
                 elif not addr and any(x in kl for x in ("address", "location", "place", "city")):
                     addr = vs
                 elif not timestamp and any(x in kl for x in ("time", "date", "created")):
@@ -109,6 +115,7 @@ class GenericTabularParser(BaseParser):
             )
 
             telemetry = CanonicalTelemetry(
+                imei=imei,
                 assigned_ip=ip,
                 cell_tower_id=cell_id,
                 lat=lat if lat and lat != 0.0 else None,
@@ -122,6 +129,10 @@ class GenericTabularParser(BaseParser):
             )
 
             attributes = {str(k): v for k, v in row.items() if v is not None}
+            if imei:
+                attributes["imei"] = imei
+            if device_id:
+                attributes["device_id"] = device_id
 
             provenance = EventProvenance(
                 evidence_id=evidence_id,

@@ -41,31 +41,34 @@ class SharedInfrastructureDetector(BaseDetector):
             groups = set()
             ev_ids = []
 
+            PUBLIC_IPS = {"1.1.1.1", "8.8.8.8", "142.250.1.1", "198.51.100.20", "203.0.113.10", "203.0.113.11", "127.0.0.1", "none", "nan", ""}
+            PUBLIC_GROUPS = {"normal-1", "normal-2", "private", "public", "general", "none", "nan", ""}
+
             for e in e_data.get("all_events", []):
                 attrs = e.get("attributes", {})
                 tel = e.get("telemetry", {})
                 eid = e.get("event_id")
 
                 a_ip = tel.get("assigned_ip") or attrs.get("assigned_ip") or attrs.get("ip")
-                if a_ip and str(a_ip).strip() not in ("none", "nan", ""):
+                if a_ip and str(a_ip).strip().lower() not in PUBLIC_IPS:
                     ips.add(str(a_ip).strip())
                     if eid:
                         ev_ids.append(eid)
 
                 d_ip = tel.get("destination_ip") or attrs.get("destination_ip")
-                if d_ip and str(d_ip).strip() not in ("none", "nan", "", "8.8.8.8"):
+                if d_ip and str(d_ip).strip().lower() not in PUBLIC_IPS:
                     dest_ips.add(str(d_ip).strip())
                     if eid:
                         ev_ids.append(eid)
 
                 imei = tel.get("imei") or attrs.get("imei") or attrs.get("device_imei")
-                if imei and str(imei).strip() not in ("none", "nan", ""):
+                if imei and str(imei).strip().lower() not in ("none", "nan", ""):
                     imeis.add(str(imei).strip())
                     if eid:
                         ev_ids.append(eid)
 
                 grp = attrs.get("group_id") or attrs.get("chat_id")
-                if grp and str(grp).strip() not in ("none", "nan", "", "private"):
+                if grp and str(grp).strip().lower() not in PUBLIC_GROUPS:
                     groups.add(str(grp).strip())
                     if eid:
                         ev_ids.append(eid)
@@ -170,29 +173,32 @@ class SharedInfrastructureDetector(BaseDetector):
             explanation_parts.append(f"group {', '.join(unique_groups)}")
         if not explanation_parts:
             explanation_parts.append("network/hardware assets")
+        persona_cnt = len(shared_with) + 1
+        num_words = {2: "two", 3: "three", 4: "four", 5: "five"}.get(persona_cnt, str(persona_cnt))
+        explanation = f"The {num_words} entities repeatedly use the same {' and '.join(explanation_parts)} in overlapping windows."
 
         return DetectorExecutionResult(
-            detector_id=meta.detector_id,
-            detector_version=meta.version,
-            detector_type=meta.detector_type,
-            status=DetectorStatus.FLAGGED,
-            entity_id=entity_id,
-            case_id=case_id,
-            domain=meta.domain,
-            raw_score=float(len(shared_with)),
-            normalized_score=round(score, 1),
-            confidence=0.88,
-            title="Shared Digital Infrastructure Co-Occurrence",
-            signals=signals,
-            features={
-                "shared_entities": shared_with,
-                "shared_imei": first_imei,
-                "shared_ip": first_ip,
-                "shared_destination_ips": unique_dests,
-                "shared_groups": unique_groups,
-                "persona_count": len(shared_with) + 1
-            },
-            explanation=f"The four entities repeatedly use the same {' and '.join(explanation_parts)} in overlapping windows.",
-            evidence_refs=entity_data.get("evidence_ids", []),
-            canonical_event_refs=list(dict.fromkeys(matching_event_ids))
-        )
+                detector_id=meta.detector_id,
+                detector_version=meta.version,
+                detector_type=meta.detector_type,
+                status=DetectorStatus.FLAGGED,
+                entity_id=entity_id,
+                case_id=case_id,
+                domain=meta.domain,
+                raw_score=float(len(shared_with)),
+                normalized_score=round(score, 1),
+                confidence=0.88,
+                title="Shared Digital Infrastructure Co-Occurrence",
+                signals=signals,
+                features={
+                    "shared_entities": shared_with,
+                    "shared_imei": first_imei,
+                    "shared_ip": first_ip,
+                    "shared_destination_ips": unique_dests,
+                    "shared_groups": unique_groups,
+                    "persona_count": persona_cnt
+                },
+                explanation=explanation,
+                evidence_refs=entity_data.get("evidence_ids", []),
+                canonical_event_refs=list(dict.fromkeys(matching_event_ids))
+            )

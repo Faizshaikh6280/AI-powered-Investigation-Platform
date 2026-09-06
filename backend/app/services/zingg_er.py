@@ -61,8 +61,7 @@ def match_handle_to_name(handle: str, name: str) -> bool:
 
 def build_clusters_deterministic(df: pd.DataFrame) -> Dict[str, str]:
     """
-    Returns mapping: record_id -> cluster_id
-    Clustering logic across multi-dimensional hard and soft anchors:
+    High-performance O(N) deterministic clustering across multi-dimensional hard and soft anchors:
       1. Same national_id (non-empty) → same cluster
       2. Same normalized phone → same cluster
       3. Same account number → same cluster
@@ -85,73 +84,89 @@ def build_clusters_deterministic(df: pd.DataFrame) -> Dict[str, str]:
 
     # 1. Group by national_id
     nid_groups: Dict[str, List[str]] = {}
-    for _, row in df.iterrows():
-        nid = str(row.get("national_id", "")).strip()
-        if nid and nid.upper() not in ("NAN", "NONE", ""):
-            nid_groups.setdefault(nid, []).append(row["record_id"])
+    for rid, nid in zip(df["record_id"], df["national_id"]):
+        if pd.notna(nid):
+            s = str(nid).strip()
+            if s and s.upper() not in ("NAN", "NONE", ""):
+                nid_groups.setdefault(s, []).append(rid)
 
     for rids in nid_groups.values():
+        first = rids[0]
         for rid in rids[1:]:
-            union(rids[0], rid)
+            union(first, rid)
 
     # 2. Group by normalized phone
     phone_groups: Dict[str, List[str]] = {}
-    for _, row in df.iterrows():
-        ph = row.get("phone_normalized")
-        if ph:
-            phone_groups.setdefault(ph, []).append(row["record_id"])
+    for rid, ph in zip(df["record_id"], df["phone_normalized"]):
+        if pd.notna(ph) and ph:
+            phone_groups.setdefault(ph, []).append(rid)
 
     for rids in phone_groups.values():
+        first = rids[0]
         for rid in rids[1:]:
-            union(rids[0], rid)
+            union(first, rid)
 
     # 3. Group by bank account number
     acc_groups: Dict[str, List[str]] = {}
-    for _, row in df.iterrows():
-        acc = str(row.get("account", "")).strip()
-        if acc and acc.upper() not in ("NAN", "NONE", ""):
-            acc_groups.setdefault(acc, []).append(row["record_id"])
+    for rid, acc in zip(df["record_id"], df["account"]):
+        if pd.notna(acc):
+            s = str(acc).strip()
+            if s and s.upper() not in ("NAN", "NONE", ""):
+                acc_groups.setdefault(s, []).append(rid)
 
     for rids in acc_groups.values():
+        first = rids[0]
         for rid in rids[1:]:
-            union(rids[0], rid)
+            union(first, rid)
 
     # 4. Group by email
     email_groups: Dict[str, List[str]] = {}
-    for _, row in df.iterrows():
-        em = str(row.get("email", "")).strip().lower()
-        if em and em not in ("nan", "none", ""):
-            email_groups.setdefault(em, []).append(row["record_id"])
+    for rid, em in zip(df["record_id"], df["email"]):
+        if pd.notna(em):
+            s = str(em).strip().lower()
+            if s and s not in ("nan", "none", ""):
+                email_groups.setdefault(s, []).append(rid)
 
     for rids in email_groups.values():
+        first = rids[0]
         for rid in rids[1:]:
-            union(rids[0], rid)
+            union(first, rid)
 
     # 5. Group by exact clean human full name
     GENERIC_NAMES = {"salary", "retail", "services", "atm", "atm_withdrawal", "transfer", "vendor-alpha", "vendor-beta", "unknown", "nan", "none"}
     name_groups: Dict[str, List[str]] = {}
-    for _, row in df.iterrows():
-        nm = str(row.get("full_name", "")).strip()
-        if nm and nm.lower() not in GENERIC_NAMES and len(nm) >= 3:
-            name_norm = " ".join(nm.lower().split())
-            name_groups.setdefault(name_norm, []).append(row["record_id"])
+    for rid, nm in zip(df["record_id"], df["full_name"]):
+        if pd.notna(nm):
+            s = str(nm).strip()
+            if s and s.lower() not in GENERIC_NAMES and len(s) >= 3:
+                name_norm = " ".join(s.lower().split())
+                name_groups.setdefault(name_norm, []).append(rid)
 
     for rids in name_groups.values():
+        first = rids[0]
         for rid in rids[1:]:
-            union(rids[0], rid)
+            union(first, rid)
 
-    # 6. Cross-link social handles to clean human names
-    for _, s_row in df.iterrows():
-        handle = str(s_row.get("handle", "")).strip()
-        if not handle or handle.lower() in ("nan", "none", ""):
-            continue
-        s_rid = s_row["record_id"]
-        for _, n_row in df.iterrows():
-            nm = str(n_row.get("full_name", "")).strip()
-            if nm and nm.lower() not in GENERIC_NAMES:
-                if match_handle_to_name(handle, nm):
-                    union(s_rid, n_row["record_id"])
-                    break
+    # 6. Cross-link social handles to clean human names (Set-based, O(unique_handles * unique_names))
+    unique_handles: Dict[str, str] = {}
+    for rid, h in zip(df["record_id"], df["handle"]):
+        if pd.notna(h):
+            s = str(h).strip()
+            if s and s.lower() not in ("nan", "none", "") and s not in unique_handles:
+                unique_handles[s] = rid
+
+    unique_names: Dict[str, str] = {}
+    for rid, nm in zip(df["record_id"], df["full_name"]):
+        if pd.notna(nm):
+            s = str(nm).strip()
+            if s and s.lower() not in GENERIC_NAMES and len(s) >= 3 and s not in unique_names:
+                unique_names[s] = rid
+
+    for handle, s_rid in unique_handles.items():
+        for nm, n_rid in unique_names.items():
+            if match_handle_to_name(handle, nm):
+                union(s_rid, n_rid)
+                break
 
     # Build final cluster_id map (stable, pretty label)
     root_to_cluster: Dict[str, str] = {}
@@ -181,7 +196,7 @@ def try_zingg_docker(csv_path: str) -> Optional[Dict]:
         print(f"[Zingg] Docker worker unavailable at {settings.ZINGG_URL}: {e}")
     return None
 
-async def run_entity_resolution(case_id: Optional[str] = None) -> Dict:
+def run_entity_resolution(case_id: Optional[str] = None) -> Dict:
     """
     Case-Aware Entity Resolution Engine:
     1. Reads canonical events for the given case_id from MinIO Parquet warehouse.
@@ -213,7 +228,7 @@ async def run_entity_resolution(case_id: Optional[str] = None) -> Dict:
 
     if events:
         for idx, ev in enumerate(events, start=1):
-            ident = ev.get("normalized_identity") or {}
+            ident = ev.get("entities") or ev.get("normalized_identity") or {}
             fin = ev.get("financial") or {}
             tel = ev.get("telemetry") or {}
             attrs = ev.get("attributes") or {}
@@ -275,13 +290,13 @@ async def run_entity_resolution(case_id: Optional[str] = None) -> Dict:
         accounts = list(set(str(acc).strip() for acc in group["account"].dropna().tolist() if acc and str(acc).lower() not in ("nan", "", "none")))
 
         social_handles = []
-        for _, r in group.iterrows():
-            if pd.notna(r.get("handle")) and str(r["handle"]).strip():
-                h_str = str(r["handle"]).strip()
-                if not any(sh["handle"] == h_str for sh in social_handles):
+        if "handle" in group.columns:
+            for h in group["handle"].dropna().unique():
+                h_str = str(h).strip()
+                if h_str and h_str.lower() not in ("nan", "none", ""):
                     social_handles.append({
                         "handle": h_str,
-                        "platform": str(r.get("platform") or "Web").strip()
+                        "platform": "Web"
                     })
 
         # Name survivorship: Pick the cleanest human name (e.g. "Arjun Mehta" over "Arjun M. Mehta")
@@ -378,7 +393,8 @@ async def run_entity_resolution(case_id: Optional[str] = None) -> Dict:
         handle_to_cluster=handle_to_cluster,
         account_to_cluster=account_to_cluster,
         nid_to_cluster=nid_to_cluster,
-        name_to_cluster=name_to_cluster
+        name_to_cluster=name_to_cluster,
+        case_id=target_case_id
     )
 
     clusters_count = len(golden_profiles)

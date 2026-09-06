@@ -5,7 +5,7 @@ import {
   ChevronRight, X, AlertTriangle, Phone, FileText, Share2,
   MapPin, AtSign, Mail, ArrowRight, Clock, Network, 
   UserRound, Landmark, WalletCards, ArrowLeftRight, MessagesSquare, Building2,
-  RefreshCcw, Activity, Cpu, Fingerprint, RadioTower, Monitor
+  RefreshCcw, Activity, Cpu, Fingerprint, RadioTower, Monitor, RefreshCw, Play, Sparkles
 } from 'lucide-react';
 import cytoscape from 'cytoscape';
 import dagre from 'cytoscape-dagre';
@@ -14,6 +14,7 @@ import fcose from 'cytoscape-fcose';
 import { useTheme } from 'next-themes';
 import { cn } from '../utils/cn';
 import { useCase } from '../context/CaseContext';
+import { apiClient } from '../services/apiClient';
 
 // Register layouts safely
 try {
@@ -101,21 +102,31 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
   const canvasBg = isDark ? '#020617' : '#f8fafc'; // slightly darker canvas for better contrast in dark mode
   const edgeColor = isDark ? '#475569' : '#cbd5e1';
 
-  const fetchData = () => {
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const fetchData = async () => {
     setLoading(true);
-    const url = activeCase?.case_id 
-      ? `/api/graph/topology?case_id=${encodeURIComponent(activeCase.case_id)}`
-      : '/api/graph/topology';
-    fetch(url)
-      .then(r => r.json())
-      .then(data => {
-        setGraphData(data);
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error("Graph fetch error", err);
-        setLoading(false);
-      });
+    try {
+      const data = await apiClient.getGraphTopology(activeCase?.case_id);
+      setGraphData(data || { nodes: [], edges: [] });
+    } catch (err) {
+      console.error("Graph fetch error", err);
+      setGraphData({ nodes: [], edges: [] });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSyncGraph = async () => {
+    setIsSyncing(true);
+    try {
+      await apiClient.syncGraph(activeCase?.case_id);
+      await fetchData();
+    } catch (err) {
+      console.error("Sync graph error:", err);
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   useEffect(() => {
@@ -434,6 +445,31 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
           </div>
         )}
 
+        {/* Empty Graph State */}
+        {!loading && (!graphData.nodes || graphData.nodes.length === 0) && (
+          <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
+            <div className="flex flex-col items-center gap-4 bg-card/90 backdrop-blur-md p-8 rounded-2xl border border-border shadow-2xl max-w-md text-center pointer-events-auto">
+              <div className="p-4 bg-primary/10 rounded-2xl border border-primary/20 text-primary">
+                <Network className="w-10 h-10" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-foreground">No Graph Topology Yet</h3>
+                <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+                  Upload evidence files in the Evidence Intake vault, or click below to synthesize and build the cross-entity graph from ingested canonical events.
+                </p>
+              </div>
+              <button
+                onClick={handleSyncGraph}
+                disabled={isSyncing}
+                className="px-5 py-2.5 bg-primary text-primary-foreground font-semibold text-sm rounded-xl hover:bg-primary/90 transition-all flex items-center gap-2 shadow-lg disabled:opacity-50 mt-2"
+              >
+                <RefreshCw className={cn("w-4 h-4", isSyncing && "animate-spin")} />
+                {isSyncing ? "Constructing Graph..." : "Rebuild / Sync Graph Now"}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Subgraph Focus Floating Banner */}
         {activeFocusId && (
           <div className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-3 px-4 py-2 bg-card/90 backdrop-blur-md border border-primary/40 rounded-xl shadow-xl z-20 animate-in fade-in slide-in-from-top-2">
@@ -494,11 +530,22 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
           </button>
 
           <button 
+            onClick={handleSyncGraph}
+            disabled={isSyncing}
+            className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 transition-colors flex items-center gap-1.5 ml-1 disabled:opacity-50"
+            title="Rebuild & Synchronize Graph with Neo4j and Canonical Events"
+          >
+            <RefreshCw className={cn("w-3.5 h-3.5", isSyncing && "animate-spin")} />
+            {isSyncing ? "Syncing..." : "Sync Graph"}
+          </button>
+
+          <button 
             onClick={fetchData}
-            className="px-3 py-1.5 text-sm font-medium rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors flex items-center gap-2 border-l border-border ml-1 pl-3"
+            disabled={loading}
+            className="px-3 py-1.5 text-sm font-medium rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors flex items-center gap-2 border-l border-border ml-1 pl-3 disabled:opacity-50"
             title="Refresh Data"
           >
-            <RefreshCcw className="w-4 h-4" />
+            <RefreshCcw className={cn("w-4 h-4", loading && "animate-spin")} />
           </button>
         </div>
 

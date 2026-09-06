@@ -33,10 +33,12 @@ class NetworkGraphAnomalyEngine(BaseDetector):
             description="Analyzes graph structure to identify cut-out bridges, hubs, and hidden communities."
         )
 
-    def _extract_case_graph(self):
+    def _extract_case_graph(self, context=None):
         """Projects Neo4j nodes and edges into an in-memory NetworkX graph for topology analysis."""
         if nx is None:
             return None
+        if context and context.get("_gds_nx_graph"):
+            return context["_gds_nx_graph"]
         G = nx.Graph()
         if not neo4j_client.ensure_connected():
             return G
@@ -126,7 +128,7 @@ class NetworkGraphAnomalyEngine(BaseDetector):
 
         G = context.get("graph_nx")
         if G is None or len(G) < meta.min_sample_size:
-            G = self._extract_case_graph()
+            G = self._extract_case_graph(context)
             context["graph_nx"] = G
 
         if G is None or len(G) < meta.min_sample_size or entity_id not in G:

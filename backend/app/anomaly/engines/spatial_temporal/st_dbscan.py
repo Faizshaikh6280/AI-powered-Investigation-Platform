@@ -55,37 +55,54 @@ class STDBSCANConvergenceDetector(BaseDetector):
         convergence_events = []
         evidence_event_ids = []
 
-        for w1 in my_waypoints:
+        def _get_ts(w):
+            dt = w.get("dt")
+            if isinstance(dt, datetime):
+                return dt.timestamp()
+            ts = w.get("timestamp") or dt
+            if not ts:
+                return None
             try:
-                t1 = w1["dt"] if isinstance(w1.get("dt"), datetime) else datetime.fromisoformat(str(w1.get("timestamp") or w1.get("dt")).replace("Z", "+00:00"))
+                return datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
             except Exception:
+                return None
+
+        # Build time-bucket index of other entities' waypoints
+        from collections import defaultdict
+        bucket_size = max(eps_sec, 60.0)
+        time_index = defaultdict(list)
+        for other_id, other_data in all_entities.items():
+            if other_id == entity_id:
+                continue
+            other_name = other_data.get("display_name") or other_id
+            for w in other_data.get("spatial", {}).get("waypoints", []):
+                t = _get_ts(w)
+                if t is None:
+                    continue
+                b = int(t // bucket_size)
+                time_index[b].append((other_id, other_name, t, w["lat"], w["lng"], w.get("cell_tower_id"), w.get("event_id"), w.get("timestamp") or w.get("dt")))
+
+        for w1 in my_waypoints:
+            t1 = _get_ts(w1)
+            if t1 is None:
                 continue
             lat1, lon1 = w1["lat"], w1["lng"]
-            cell1 = w1.get("cell_tower_id")
+            cell1 = str(w1.get("cell_tower_id") or "").strip().upper()
+            b = int(t1 // bucket_size)
 
-            # Compare with other entities in the case
-            for other_id, other_data in all_entities.items():
-                if other_id == entity_id:
-                    continue
-
-                for w2 in other_data.get("spatial", {}).get("waypoints", []):
-                    try:
-                        t2 = w2["dt"] if isinstance(w2.get("dt"), datetime) else datetime.fromisoformat(str(w2.get("timestamp") or w2.get("dt")).replace("Z", "+00:00"))
-                    except Exception:
-                        continue
-                    time_diff = abs((t2 - t1).total_seconds())
-
+            for bucket_id in (b - 1, b, b + 1):
+                for other_id, other_name, t2, lat2, lon2, cell2, ev2, orig_time in time_index.get(bucket_id, []):
+                    time_diff = abs(t2 - t1)
                     if time_diff <= eps_sec:
-                        cell2 = w2.get("cell_tower_id")
-                        if cell1 and cell2 and str(cell1).strip().upper() == str(cell2).strip().upper():
+                        c2_str = str(cell2 or "").strip().upper()
+                        if cell1 and c2_str and cell1 == c2_str:
                             dist = 0.0
-                            matched_tower = str(cell1).strip().upper()
+                            matched_tower = cell1
                         else:
-                            dist = spatial_features.haversine_km(lat1, lon1, w2["lat"], w2["lng"])
-                            matched_tower = cell1 or cell2 or "GPS_PROXIMITY"
+                            dist = spatial_features.haversine_km(lat1, lon1, lat2, lon2)
+                            matched_tower = cell1 or c2_str or "GPS_PROXIMITY"
 
                         if dist <= eps_km:
-                            other_name = other_data.get("display_name") or other_id
                             co_located_entities.add(other_name)
                             convergence_events.append({
                                 "peer_entity": other_name,
@@ -96,8 +113,8 @@ class STDBSCANConvergenceDetector(BaseDetector):
                             })
                             if w1.get("event_id"):
                                 evidence_event_ids.append(w1["event_id"])
-                            if w2.get("event_id"):
-                                evidence_event_ids.append(w2["event_id"])
+                            if ev2:
+                                evidence_event_ids.append(ev2)
 
         if not co_located_entities:
             return DetectorExecutionResult(

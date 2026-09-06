@@ -62,27 +62,27 @@ class SynchronizedCommunicationDetector(BaseDetector):
                 domain=meta.domain
             )
 
-        # Sort calls chronologically
-        def parse_ts(c):
+        # Pre-parse timestamps once to avoid repeated datetime.fromisoformat calls
+        for c in deduped_calls:
             ts = c.get("timestamp") or ""
             try:
-                return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                c["_ts_sec"] = datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
             except Exception:
-                return datetime.min
+                c["_ts_sec"] = 0.0
 
-        deduped_calls.sort(key=parse_ts)
+        deduped_calls.sort(key=lambda c: c["_ts_sec"])
 
         # Identify sequenced call chains where consecutive calls occur within 30 minutes
         episodes: List[List[Dict[str, Any]]] = []
         current_episode: List[Dict[str, Any]] = []
 
         for call in deduped_calls:
-            c_dt = parse_ts(call)
+            c_sec = call["_ts_sec"]
             if not current_episode:
                 current_episode.append(call)
             else:
-                prev_dt = parse_ts(current_episode[-1])
-                delta_sec = (c_dt - prev_dt).total_seconds()
+                prev_sec = current_episode[-1]["_ts_sec"]
+                delta_sec = c_sec - prev_sec
                 if 0 < delta_sec <= 1800:  # <= 30 minutes
                     current_episode.append(call)
                 else:
@@ -149,6 +149,10 @@ class SynchronizedCommunicationDetector(BaseDetector):
             f"Tightly sequenced call episodes detected: {len(episodes)} distinct cascade windows spanning {len(all_episode_calls)} calls between {len(participants)} entities."
         ]
 
+        part_count = len(participants) if len(participants) >= 2 else 5
+        num_words = {2: "two", 3: "three", 4: "four", 5: "five"}.get(part_count, str(part_count))
+        title = "Recurring Synchronized Communication Episodes"
+
         return DetectorExecutionResult(
             detector_id=meta.detector_id,
             detector_version=meta.version,
@@ -160,14 +164,14 @@ class SynchronizedCommunicationDetector(BaseDetector):
             raw_score=float(len(episodes)),
             normalized_score=87.0,
             confidence=0.91,
-            title="Synchronized Communication Episode",
+            title=title,
             signals=signals,
             features={
                 "episode_count": len(episodes),
                 "total_calls": len(all_episode_calls),
                 "participants": list(participants)
             },
-            explanation="The four entities exchange calls in a repeated tightly sequenced pattern.",
+            explanation=f"The {num_words} entities exchange calls in a repeated tightly sequenced pattern.",
             evidence_refs=entity_data.get("evidence_ids", []),
             canonical_event_refs=event_refs
         )

@@ -79,6 +79,67 @@ def create_case(payload: CaseCreateRequest, db: Session = Depends(get_db)):
         created_by=new_case.created_by
     )
 
+STANDARD_BENCHMARK_CASES = [
+    {
+        "case_id": "INV-2026-BLACK-CIRCUIT",
+        "case_reference": "INV-2026-BLACK-CIRCUIT",
+        "title": "Operation Black Circuit",
+        "description": "High-velocity cybercrime syndicate operating across Chandigarh, Mohali, and Zirakpur.",
+        "status": "ACTIVE",
+        "created_by": "SYSTEM"
+    },
+    {
+        "case_id": "INV-2026-IRON-LOTUS",
+        "case_reference": "INV-2026-IRON-LOTUS",
+        "title": "Operation Iron Lotus",
+        "description": "Cross-jurisdictional syndicate tracking across Chandigarh, Mohali, and Panchkula.",
+        "status": "ACTIVE",
+        "created_by": "SYSTEM"
+    },
+    {
+        "case_id": "INV-2026-NIGHT-LEDGER",
+        "case_reference": "INV-2026-NIGHT-LEDGER",
+        "title": "Operation Night Ledger",
+        "description": "Financial layering, hawala networks, and ATM cash extractions in Delhi NCR.",
+        "status": "ACTIVE",
+        "created_by": "SYSTEM"
+    },
+    {
+        "case_id": "INV-2026-RED-HAVEN",
+        "case_reference": "INV-2026-RED-HAVEN",
+        "title": "Operation Red Haven",
+        "description": "Physical convergence and incident scene tracking in South Delhi.",
+        "status": "ACTIVE",
+        "created_by": "SYSTEM"
+    }
+]
+
+def _ensure_benchmark_cases(db: Session):
+    for b in STANDARD_BENCHMARK_CASES:
+        existing = db.query(CaseModel).filter(
+            (CaseModel.case_id == b["case_id"]) | (CaseModel.case_reference == b["case_reference"])
+        ).first()
+        if not existing:
+            new_c = CaseModel(
+                case_id=b["case_id"],
+                case_reference=b["case_reference"],
+                title=b["title"],
+                description=b["description"],
+                status=b["status"],
+                created_by=b["created_by"]
+            )
+            db.add(new_c)
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
+
+@router.post("/seed_benchmarks")
+def seed_benchmark_cases(db: Session = Depends(get_db)):
+    """Explicitly seeds the 4 standard benchmark cases."""
+    _ensure_benchmark_cases(db)
+    return {"status": "success", "message": "Benchmark cases registered successfully"}
+
 @router.get("", response_model=List[CaseResponse])
 def list_cases(db: Session = Depends(get_db)):
     """List all registered investigation cases."""
@@ -90,7 +151,7 @@ def list_cases(db: Session = Depends(get_db)):
             title=c.title,
             description=c.description,
             status=c.status,
-            created_at=c.created_at.isoformat(),
+            created_at=c.created_at.isoformat() if c.created_at else datetime.datetime.now(datetime.timezone.utc).isoformat(),
             created_by=c.created_by
         ) for c in cases
     ]
@@ -109,7 +170,7 @@ def get_case_details(case_id: str, db: Session = Depends(get_db)):
         "title": case.title,
         "description": case.description,
         "status": case.status,
-        "created_at": case.created_at.isoformat(),
+        "created_at": case.created_at.isoformat() if case.created_at else datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "created_by": case.created_by,
         "evidence_count": len(evidence_items),
         "evidence": [{
@@ -137,6 +198,7 @@ async def upload_evidence(
     Accepts optional source_type or auto-detects if omitted.
     The platform calculates SHA-256, encrypts via AES-256-GCM, stores to MinIO,
     detects source domain, normalizes, deduplicates, and produces data quality metrics.
+    Automatically triggers Entity Resolution, Graph Synchronization, and Anomaly Detection.
     """
     case = db.query(CaseModel).filter_by(case_id=case_id).first()
     if not case:
@@ -161,6 +223,14 @@ async def upload_evidence(
                 case_id=case_id,
                 evidence_id=evidence_id
             )
+
+            # Automatically trigger Entity Resolution, Graph Sync, and Anomaly Detection in background
+            try:
+                from app.services.pipeline_orchestrator import run_case_pipeline_async
+                run_case_pipeline_async(case_id=case_id)
+            except Exception as pe:
+                logger.warning(f"Background pipeline auto-trigger failed for case {case_id}: {pe}")
+
             return result
         except ValueError as ve:
             logger.error(f"Evidence processing validation error for {file.filename}: {ve}")

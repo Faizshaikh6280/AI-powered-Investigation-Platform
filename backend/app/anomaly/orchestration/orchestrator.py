@@ -46,7 +46,7 @@ class MultiEngineOrchestrator:
     def __init__(self):
         self.registry = detector_registry
 
-    def run_case_analysis(self, case_id: Optional[str] = None) -> Dict[str, Any]:
+    def run_case_analysis(self, case_id: Optional[str] = None, events: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """
         Executes end-to-end investigative analysis for a case.
         """
@@ -97,7 +97,7 @@ class MultiEngineOrchestrator:
         try:
             # ── Stage 1: Feature Extraction ──────────────────────────
             logger.info("Stage 1: Building entity feature store from Canonical Warehouse...")
-            entity_store = feature_factory.build_entity_feature_store(case_id=resolved_case_id)
+            entity_store = feature_factory.build_entity_feature_store(case_id=resolved_case_id, events=events)
             population_df = feature_factory.build_tabular_matrix(entity_store)
 
             context: Dict[str, Any] = {

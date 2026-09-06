@@ -228,11 +228,24 @@ function InvestigationWorkspace() {
           )}
 
           {activeTab === 'timeline' && (
-            <TimelineFootprint />
+            <TimelineFootprint 
+              onNavigateToGraph={(entityId) => {
+                setFocusAnomalyEntityId(entityId);
+                setActiveTab('relationship-graph');
+              }}
+              onNavigateToMap={() => {
+                setActiveTab('geospatial');
+              }}
+            />
           )}
 
           {activeTab === 'geospatial' && (
-            <GeospatialMap />
+            <GeospatialMap 
+              onViewOnGraph={(entityId) => {
+                setFocusAnomalyEntityId(entityId);
+                setActiveTab('relationship-graph');
+              }}
+            />
           )}
 
           {activeTab === 'anomalies' && (

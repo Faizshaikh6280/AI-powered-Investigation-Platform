@@ -18,7 +18,9 @@ from app.anomaly.engines.identity.discrepancy_engine import IdentityDiscrepancyE
 from app.anomaly.engines.graph.gds_engine import GraphDataScienceEngine
 
 from app.anomaly.engines.financial.coordinated_flow import CoordinatedFinancialFlowDetector
+from app.anomaly.engines.financial.transaction_burst import HighValueTransactionBurstDetector
 from app.anomaly.engines.communication.synchronized_communication import SynchronizedCommunicationDetector
+from app.anomaly.engines.spatial_temporal.trajectory_engine import GeospatialTrajectoryDetector
 
 class DetectorRegistry:
     """
@@ -39,10 +41,12 @@ class DetectorRegistry:
         self.register(DormantAccountAwakeningDetector())
         self.register(StructuringSmurfingDetector())
         self.register(CoordinatedFinancialFlowDetector())
+        self.register(HighValueTransactionBurstDetector())
         self.register(SynchronizedCommunicationDetector())
         self.register(ImpossibleTravelDetector())
         self.register(STDBSCANConvergenceDetector())
         self.register(TrajectoryTailingDetector())
+        self.register(GeospatialTrajectoryDetector())
         self.register(DarkPeriodDetector())
         self.register(SharedInfrastructureDetector())
         self.register(SynchronousSocialActivityDetector())

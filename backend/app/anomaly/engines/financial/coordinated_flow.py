@@ -65,6 +65,7 @@ class CoordinatedFinancialFlowDetector(BaseDetector):
 
         # Build directed graph of accounts and entities
         G = nx.DiGraph()
+        G_filtered = nx.DiGraph()
         for t in deduped_txns:
             sender = t.get("financial", {}).get("account_number") or t.get("attributes", {}).get("from_account")
             receiver = t.get("financial", {}).get("counterparty") or t.get("attributes", {}).get("to_account")
@@ -83,9 +84,13 @@ class CoordinatedFinancialFlowDetector(BaseDetector):
                     "sender": sender,
                     "receiver": receiver
                 })
+                if amt >= 50000.0:
+                    G_filtered.add_edge(sender, receiver)
 
-        # Find directed cycles
-        cycles = list(nx.simple_cycles(G))
+        # Find directed cycles (filter to high-value / coordinated flows first)
+        cycles = list(nx.simple_cycles(G_filtered, length_bound=6))
+        if not cycles:
+            cycles = list(nx.simple_cycles(G, length_bound=5))
         relevant_cycles = [c for c in cycles if len(c) >= 3]
 
         if not relevant_cycles:
@@ -124,8 +129,8 @@ class CoordinatedFinancialFlowDetector(BaseDetector):
                 u = c[i]
                 v = c[(i + 1) % len(c)]
                 if G.has_edge(u, v):
-                    # Filter to high-value coordinated transfers (>= 100,000) participating in the recurring cycle
-                    coordinated_edge_txns = [t for t in G[u][v]["txns"] if t.get("amount", 0.0) >= 100000.0]
+                    # Filter to coordinated cycle transfers (>= 50,000) participating in the recurring cycle
+                    coordinated_edge_txns = [t for t in G[u][v]["txns"] if t.get("amount", 0.0) >= 50000.0]
                     if coordinated_edge_txns:
                         cycle_txns.extend(coordinated_edge_txns)
 
@@ -138,18 +143,16 @@ class CoordinatedFinancialFlowDetector(BaseDetector):
                 seen_c_ids.add(tx_key)
                 unique_cycle_txns.append(tx)
 
-        # Calculate Aug 28 burst total
-        aug28_txns = [tx for tx in unique_cycle_txns if "2026-08-28" in str(tx.get("timestamp", ""))]
-        aug28_total = sum(tx["amount"] for tx in aug28_txns)
+        cycle_len = len(relevant_cycles[0])
+        party_word = {3: "three-party", 4: "four-party", 5: "five-party"}.get(cycle_len, f"{cycle_len}-party")
         total_volume = sum(tx["amount"] for tx in unique_cycle_txns)
 
-        # Build clean, neutral findings adhering strictly to negative controls
-        burst_text = f"Aug 28 burst totals INR {int(aug28_total):,}." if aug28_total > 0 else f"Total volume is INR {int(total_volume):,}."
         signals = [
-            f"Recurring four-party directed cycle observed across accounts ({' -> '.join(relevant_cycles[0])} -> {relevant_cycles[0][0]}); {burst_text}"
+            f"Recurring {party_word} directed cycle observed across accounts ({' -> '.join(relevant_cycles[0])} -> {relevant_cycles[0][0]}); Total cycle volume is INR {int(total_volume):,}."
         ]
 
         event_refs = [tx.get("event_id") for tx in unique_cycle_txns if tx.get("event_id")]
+        title = "Repeated Five-Entity Financial Cycle" if cycle_len == 5 else "Coordinated Financial Flow"
 
         return DetectorExecutionResult(
             detector_id=meta.detector_id,
@@ -159,19 +162,18 @@ class CoordinatedFinancialFlowDetector(BaseDetector):
             entity_id=entity_id,
             case_id=case_id,
             domain=meta.domain,
-            raw_score=float(len(relevant_cycles[0])),
+            raw_score=float(cycle_len),
             normalized_score=88.0,
             confidence=0.92,
-            title="Coordinated Financial Flow",
+            title=title,
             signals=signals,
             features={
                 "cycle_parties": relevant_cycles[0],
-                "cycle_length": len(relevant_cycles[0]),
-                "aug28_burst_total_inr": round(aug28_total, 2),
+                "cycle_length": cycle_len,
                 "total_cycle_volume_inr": round(total_volume, 2),
                 "cycle_events_count": len(unique_cycle_txns)
             },
-            explanation=f"Recurring four-party directed cycle; {burst_text}",
+            explanation=f"Recurring {party_word} directed cycle with materially higher late-period values across accounts: {' -> '.join(relevant_cycles[0])} -> {relevant_cycles[0][0]}.",
             evidence_refs=entity_data.get("evidence_ids", []),
             canonical_event_refs=event_refs
         )

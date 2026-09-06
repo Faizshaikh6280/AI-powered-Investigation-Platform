@@ -255,13 +255,39 @@ class PatternLibrary:
         self.register(PatternDefinition(
             pattern_id="COMM_SYNCHRONIZED_EPISODE",
             category="COMMUNICATION",
-            title_template="Synchronized Communication Episode",
+            title_template="Recurring Synchronized Communication Episodes",
             required_detectors_or_types=["DET-COMM-SYNC-EPISODE"],
             optional_detectors_or_types=["DET-SOC-SYNC"],
             min_event_count=3,
-            what_happened_template="The four entities exchange calls in a repeated tightly sequenced pattern.",
+            what_happened_template="The five entities exchange calls in a repeated tightly sequenced pattern.",
             why_unusual_template="Repeated multi-party sequential call chains occurring within narrow time cascades deviate from random communication patterns.",
             why_relevant_template="Cascading call episodes establish operational synchronization across the active entity group."
+        ))
+
+        # 18. High-Value Transaction Burst
+        self.register(PatternDefinition(
+            pattern_id="FIN_HIGH_VALUE_BURST",
+            category="FINANCIAL",
+            title_template="High-Value Transaction Burst",
+            required_detectors_or_types=["DET-FIN-HIGH-VALUE-BURST"],
+            optional_detectors_or_types=["DET-BEHAVIORAL-IF", "DET-FIN-FANOUT"],
+            min_event_count=2,
+            what_happened_template="Late-period bank transactions exhibit unusual amount and velocity relative to background.",
+            why_unusual_template="Elevated transaction amounts and high transaction frequency deviate sharply from historical account baselines.",
+            why_relevant_template="Documents significant concentrated fund transfers during the critical investigation period."
+        ))
+
+        # 19. Progressive Geospatial Trajectory
+        self.register(PatternDefinition(
+            pattern_id="GEO_TRAJECTORY",
+            category="SPATIAL_TEMPORAL",
+            title_template="Geospatial Multi-Location Trajectory",
+            required_detectors_or_types=["DET-GEO-TRAJECTORY"],
+            optional_detectors_or_types=["DET-SPATIAL-TAILING"],
+            min_event_count=3,
+            what_happened_template="Recorded progressive multi-location trajectory traversing distinct sectors and municipal locations.",
+            why_unusual_template="Sequential transit across multiple distinct locations in a short window represents an active operational movement pattern.",
+            why_relevant_template="Establishes the physical movement route of the subject during the critical investigative window."
         ))
 
 

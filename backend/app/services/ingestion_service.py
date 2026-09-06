@@ -137,14 +137,16 @@ async def process_file(
             ev_record.duplicate_record_count = duplicate_count
             ev_record.quality_score = quality_summary["quality_score"]
 
-        # Persist Quarantined Records
-        for q in quarantined_rows:
-            db.add(QuarantineRecordModel(
-                evidence_id=evidence_id,
-                row_index=q["row_index"],
-                reason=q["reason"],
-                raw_payload=q["raw_payload"]
-            ))
+        # Persist Quarantined Records in bulk
+        if quarantined_rows:
+            db.add_all([
+                QuarantineRecordModel(
+                    evidence_id=evidence_id,
+                    row_index=q["row_index"],
+                    reason=q["reason"],
+                    raw_payload=q["raw_payload"]
+                ) for q in quarantined_rows
+            ])
 
         # Persist Quality Report
         db.add(DataQualityReportModel(

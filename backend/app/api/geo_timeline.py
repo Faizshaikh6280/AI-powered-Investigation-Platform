@@ -1,88 +1,150 @@
-from fastapi import APIRouter
-from typing import List, Dict, Any
-from datetime import datetime
-from app.processing.canonical_reader import canonical_reader
+from fastapi import APIRouter, Query, HTTPException, Body
+from typing import List, Dict, Any, Optional
+from pydantic import BaseModel
+
+from app.geo.service import geo_service
+from app.geo.schemas import (
+    GeoInvestigationResponse, AreaInvestigationResult, MovementSegment,
+    CoLocationFinding, CommonPlace
+)
 
 router = APIRouter()
 
-def iso_to_ms(iso_str: str) -> int:
-    try:
-        dt = datetime.fromisoformat(iso_str.replace('Z', '+00:00'))
-        return int(dt.timestamp() * 1000)
-    except Exception:
-        return 0
+class AreaQueryRequest(BaseModel):
+    case_id: str
+    center_lat: float
+    center_lng: float
+    radius_meters: float = 500.0
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
 
 @router.get("/sync-data")
-async def get_sync_data(case_id: str = None):
+def get_sync_data(case_id: Optional[str] = None):
     """
     Retrieves chronological timeline events and Deck.gl TripsLayer geospatial waypoints.
-    Reads from the MinIO Parquet canonical warehouse.
-    Zero MongoDB dependency.
+    Preserves 100% backward compatibility with existing TripsLayer callers.
     """
-    target_case_id = case_id
-    if not target_case_id:
-        from app.core.database import get_db_context
-        from app.models.postgres_models import CaseModel
-        with get_db_context() as db:
-            c = db.query(CaseModel).order_by(CaseModel.created_at.desc()).first()
-            if not c:
-                return {"timeline": [], "waypoints": []}
-            target_case_id = c.case_id
+    try:
+        return geo_service.get_trips_sync_data(case_id=case_id)
+    except Exception as e:
+        return {"timeline": [], "waypoints": [], "error": str(e)}
 
-    events = canonical_reader.read_all_events(case_id=target_case_id)
+@router.get("/investigation", response_model=GeoInvestigationResponse)
+def get_geo_investigation(
+    case_id: str = Query(..., description="Target investigation case ID"),
+    entity_ids: Optional[str] = Query(None, description="Comma-separated entity IDs or names"),
+    domains: Optional[str] = Query(None, description="Comma-separated domains (TELECOM, FINANCIAL, LOCATION, SOCIAL, NETWORK)"),
+    start_time: Optional[str] = Query(None, description="ISO-8601 UTC start time"),
+    end_time: Optional[str] = Query(None, description="ISO-8601 UTC end time"),
+    min_confidence: Optional[float] = Query(None, description="Minimum location confidence (0.0 to 1.0)"),
+    min_lng: Optional[float] = Query(None),
+    min_lat: Optional[float] = Query(None),
+    max_lng: Optional[float] = Query(None),
+    max_lat: Optional[float] = Query(None)
+):
+    """
+    Complete Geospatial Investigation endpoint.
+    Returns normalized geo events, movement trajectories, co-location findings,
+    common places, activity density cells, narrative story cards, and summary stats.
+    """
+    ent_list = [e.strip() for e in entity_ids.split(",")] if entity_ids else None
+    dom_list = [d.strip() for d in domains.split(",")] if domains else None
+    
+    bbox = None
+    if all(x is not None for x in [min_lng, min_lat, max_lng, max_lat]):
+        bbox = [min_lng, min_lat, max_lng, max_lat]
 
-    timeline_data = []
-    waypoint_data = {}
+    try:
+        return geo_service.get_geo_investigation(
+            case_id=case_id,
+            entity_ids=ent_list,
+            domains=dom_list,
+            start_time=start_time,
+            end_time=end_time,
+            min_confidence=min_confidence,
+            bbox=bbox
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Geo investigation query failed: {str(e)}")
 
-    for ev in events:
-        ts_str = ev.get("timestamp")
-        if not ts_str:
-            continue
+@router.get("/movements", response_model=List[MovementSegment])
+def get_movements(
+    case_id: str = Query(...),
+    entity_ids: Optional[str] = Query(None)
+):
+    """
+    Reconstructs chronological movement segments and gaps for entities.
+    """
+    ent_list = [e.strip() for e in entity_ids.split(",")] if entity_ids else None
+    investigation = geo_service.get_geo_investigation(case_id=case_id, entity_ids=ent_list)
+    return investigation.movements
 
-        ts_ms = iso_to_ms(ts_str)
-        if ts_ms == 0:
-            continue
+@router.get("/co-locations", response_model=List[CoLocationFinding])
+def get_co_locations(
+    case_id: str = Query(...)
+):
+    """
+    Retrieves detected multi-entity cell sector and proximity co-location findings.
+    """
+    investigation = geo_service.get_geo_investigation(case_id=case_id)
+    return investigation.co_locations
 
-        # Add to chronological timeline
-        timeline_data.append({
-            "id": str(ev.get("event_id")),
-            "domain": ev.get("domain") or ev.get("source_type", "UNKNOWN"),
-            "event_type": ev.get("event_type", ""),
-            "timestamp": ts_str,
-            "time_ms": ts_ms,
-            "identity": ev.get("normalized_identity", {}),
-            "financial": ev.get("financial", {}),
-            "telemetry": ev.get("telemetry", {})
-        })
+@router.get("/common-places", response_model=List[CommonPlace])
+def get_common_places(
+    case_id: str = Query(...)
+):
+    """
+    Retrieves high-frequency spatial hubs and common places with entity overlap.
+    """
+    investigation = geo_service.get_geo_investigation(case_id=case_id)
+    return investigation.common_places
 
-        # Group into waypoints if geospatial coordinates exist
-        cluster_id = ev.get("z_cluster_id")
-        telemetry = ev.get("telemetry", {})
-        lat = telemetry.get("lat")
-        lng = telemetry.get("lng")
+@router.post("/area-query", response_model=AreaInvestigationResult)
+def area_query(payload: AreaQueryRequest):
+    """
+    Area Investigation query: 'Who Was Here?' and 'What Happened Here?'.
+    Searches within a geodesic circle radius and returns all entities and events inside.
+    """
+    try:
+        return geo_service.run_area_query(
+            case_id=payload.case_id,
+            center_lat=payload.center_lat,
+            center_lng=payload.center_lng,
+            radius_meters=payload.radius_meters,
+            start_time=payload.start_time,
+            end_time=payload.end_time
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Area query failed: {str(e)}")
 
-        if cluster_id and lat is not None and lng is not None:
-            if cluster_id not in waypoint_data:
-                waypoint_data[cluster_id] = {
-                    "cluster_id": cluster_id,
-                    "path": [],
-                    "timestamps": []
-                }
-            waypoint_data[cluster_id]["path"].append([float(lng), float(lat)])
-            waypoint_data[cluster_id]["timestamps"].append(ts_ms)
+@router.get("/segment-context")
+def get_segment_context(
+    case_id: str = Query(...),
+    event_id: str = Query(...),
+    window_seconds: float = Query(1800.0, description="Temporal window around event in seconds")
+):
+    """
+    Before and After Movement Context.
+    Retrieves events directly prior to departure and upon arrival around a waypoint or movement segment.
+    """
+    try:
+        return geo_service.get_movement_context(
+            case_id=case_id,
+            event_id=event_id,
+            window_seconds=window_seconds
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Movement context query failed: {str(e)}")
 
-    # Sort timeline by time
-    timeline_data.sort(key=lambda x: x["time_ms"])
-
-    # Sort waypoints by time internally
-    formatted_waypoints = []
-    for cid, data in waypoint_data.items():
-        sorted_pairs = sorted(zip(data["timestamps"], data["path"]))
-        data["timestamps"] = [p[0] for p in sorted_pairs]
-        data["path"] = [p[1] for p in sorted_pairs]
-        formatted_waypoints.append(data)
-
-    return {
-        "timeline": timeline_data,
-        "waypoints": formatted_waypoints
-    }
+@router.get("/export")
+def export_geo_dossier(
+    case_id: str = Query(...),
+    format: str = Query("geojson", pattern="^(geojson|json)$")
+):
+    """
+    Exports geospatial intelligence findings as standard GeoJSON FeatureCollection or JSON dossier.
+    """
+    try:
+        return geo_service.export_geo_dossier(case_id=case_id, export_format=format)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
