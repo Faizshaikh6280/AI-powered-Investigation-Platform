@@ -1532,3 +1532,5 @@ export function InvestigationDashboard({ activeCaseId }: Props) {
     </div>
   );
 }
+
+export default InvestigationDashboard;

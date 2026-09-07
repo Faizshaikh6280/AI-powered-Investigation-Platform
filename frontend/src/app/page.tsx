@@ -5,11 +5,13 @@ import {
   Search, Bell, HelpCircle, User, Activity, FolderOpen, Database, 
   Users, Share2, Clock, Map, AlertTriangle, FileText, Smartphone, 
   Globe, BarChart3, ShieldCheck, Settings, LogOut, ChevronRight,
-  Sun, Moon, Menu, Command, X, Cpu, Plus, Layers, Crosshair
+  Sun, Moon, Menu, Command, X, Cpu, Plus, Layers, Crosshair, Camera,
+  Shield, LogIn
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { cn } from '../utils/cn';
 import { CaseProvider, useCase } from '../context/CaseContext';
+import { AuthProvider, useAuth, SEEDED_DEV_ACCOUNTS } from '../context/AuthContext';
 
 // Modules
 import OverviewDashboard from '../components/OverviewDashboard';
@@ -20,30 +22,55 @@ import EntityResolutionMatrix from '../components/EntityResolutionMatrix';
 import GraphTopologyViewer from '../components/GraphTopologyViewer';
 import TimelineFootprint from '../components/TimelineFootprint';
 import GeospatialMap from '../components/GeospatialMap';
+import { CCTVIntelligenceWorkspace } from '../components/cctv/CCTVIntelligenceWorkspace';
 import AnomaliesTab from '../components/AnomaliesTab';
 import AnomalyInvestigationDrawer from '../components/AnomalyInvestigationDrawer';
 import CaseDossierExporter from '../components/CaseDossierExporter';
 import AuditTrailLogs from '../components/AuditTrailLogs';
 import { InvestigationDashboard } from '../components/InvestigationDashboard';
 import CreateCaseModal from '../components/CreateCaseModal';
+import LoginModal from '../components/auth/LoginModal';
+import UserProfileModal from '../components/auth/UserProfileModal';
+import UserManagementView from '../components/admin/UserManagementView';
 
-const navigation = [
+interface NavItem {
+  id: string;
+  label: string;
+  icon: any;
+  permission?: string;
+}
+
+const navigation: NavItem[] = [
   { id: 'overview', label: 'Overview', icon: Activity },
   { id: 'agentic', label: 'Agentic Forensics', icon: Crosshair },
-  { id: 'investigations', label: 'Case Dossiers', icon: FolderOpen },
-  { id: 'data-sources', label: 'Evidence Intake', icon: Database },
-  { id: 'pipeline', label: 'Processing Pipeline', icon: Cpu },
-  { id: 'entity-explorer', label: 'Entity Explorer', icon: Users },
-  { id: 'relationship-graph', label: 'Relationship Graph', icon: Share2 },
-  { id: 'timeline', label: 'Timeline', icon: Clock },
-  { id: 'geospatial', label: 'Geospatial Map', icon: Map },
-  { id: 'anomalies', label: 'Anomalies & Radar', icon: AlertTriangle },
-  { id: 'reports', label: 'Reports & Export', icon: BarChart3 },
-  { id: 'audit', label: 'Audit Trail', icon: ShieldCheck },
+  { id: 'investigations', label: 'Case Dossiers', icon: FolderOpen, permission: 'case.read' },
+  { id: 'data-sources', label: 'Evidence Intake', icon: Database, permission: 'evidence.view' },
+  { id: 'pipeline', label: 'Processing Pipeline', icon: Cpu, permission: 'evidence.view' },
+  { id: 'entity-explorer', label: 'Entity Explorer', icon: Users, permission: 'entity.view' },
+  { id: 'relationship-graph', label: 'Relationship Graph', icon: Share2, permission: 'graph.view' },
+  { id: 'timeline', label: 'Timeline', icon: Clock, permission: 'timeline.view' },
+  { id: 'geospatial', label: 'Geospatial Map', icon: Map, permission: 'geospatial.view' },
+  { id: 'cctv', label: 'CCTV Intelligence', icon: Camera, permission: 'cctv.view' },
+  { id: 'anomalies', label: 'Anomalies & Radar', icon: AlertTriangle, permission: 'anomaly.view' },
+  { id: 'reports', label: 'Reports & Export', icon: BarChart3, permission: 'report.view' },
+  { id: 'audit', label: 'Audit Trail', icon: ShieldCheck, permission: 'audit.view' },
+  { id: 'personnel', label: 'Personnel & IAM', icon: Shield, permission: 'user.view' },
 ];
 
 function InvestigationWorkspace() {
   const { cases, activeCase, setActiveCaseId } = useCase();
+  const { 
+    user, 
+    role, 
+    permissions, 
+    isAuthenticated, 
+    can, 
+    logout, 
+    switchDevRole, 
+    setIsProfileModalOpen, 
+    setIsLoginModalOpen 
+  } = useAuth();
+
   const [activeTab, setActiveTab] = useState('overview');
   const [isSidebarExpanded, setSidebarExpanded] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -56,6 +83,27 @@ function InvestigationWorkspace() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => setMounted(true), []);
+
+  // Handle case_id redirect from NFC authentication
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const targetCase = params.get('case_id') || params.get('case');
+      if (targetCase) {
+        setActiveCaseId(targetCase);
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    }
+  }, [setActiveCaseId]);
+
+  // Redirect if current tab becomes unauthorized on role switch
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const currentNav = navigation.find(n => n.id === activeTab);
+    if (currentNav && currentNav.permission && !can(currentNav.permission)) {
+      setActiveTab('overview');
+    }
+  }, [role, permissions, activeTab, can, isAuthenticated]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -70,6 +118,8 @@ function InvestigationWorkspace() {
   }, []);
 
   if (!mounted) return null;
+
+  const visibleNavItems = navigation.filter(item => !item.permission || can(item.permission));
 
   return (
     <div className="flex h-screen w-full bg-background text-foreground overflow-hidden relative">
@@ -93,7 +143,7 @@ function InvestigationWorkspace() {
         </div>
         
         <div className="flex-1 overflow-y-auto py-4 px-2 space-y-1 scrollbar-hide hover:scrollbar-default">
-          {navigation.map((item) => (
+          {visibleNavItems.map((item) => (
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
@@ -138,13 +188,15 @@ function InvestigationWorkspace() {
               ) : (
                 <span className="text-xs font-bold text-muted-foreground">No Cases</span>
               )}
-              <button
-                onClick={() => setIsCreateModalOpen(true)}
-                className="p-0.5 text-muted-foreground hover:text-primary transition-colors ml-1"
-                title="Create New Case Dossier"
-              >
-                <Plus className="w-3.5 h-3.5" />
-              </button>
+              {can('case.create') && (
+                <button
+                  onClick={() => setIsCreateModalOpen(true)}
+                  className="p-0.5 text-muted-foreground hover:text-primary transition-colors ml-1"
+                  title="Create New Case Dossier"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
             
             {activeCase?.status && (
@@ -155,7 +207,7 @@ function InvestigationWorkspace() {
           </div>
 
           {/* Quick Search */}
-          <div className="flex-1 max-w-xl px-8 hidden md:block">
+          <div className="flex-1 max-w-xl px-4 hidden md:block">
             <button 
               onClick={() => setCmdOpen(true)}
               className="flex items-center w-full px-3 py-1.5 bg-secondary text-muted-foreground border border-border rounded-md hover:bg-secondary/80 transition-colors text-sm"
@@ -168,8 +220,27 @@ function InvestigationWorkspace() {
             </button>
           </div>
 
-          {/* Right Header Icons */}
+          {/* Right Header Controls & IAM Profile Badge */}
           <div className="flex items-center gap-2">
+            {/* Dev Quick Role Switcher */}
+            <div className="hidden lg:flex items-center gap-1.5 bg-secondary/70 border border-border px-2 py-1 rounded-lg">
+              <Shield className="w-3.5 h-3.5 text-primary" />
+              <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Role:</span>
+              <select
+                value={role || ''}
+                onChange={(e) => switchDevRole(e.target.value)}
+                className="bg-transparent text-xs font-semibold text-foreground border-none outline-none cursor-pointer pr-1"
+                title="Law Enforcement Role Switcher (RBAC Test Bed)"
+              >
+                {Object.entries(SEEDED_DEV_ACCOUNTS).map(([key, acc]) => (
+                  <option key={key} value={key} className="bg-card text-foreground">
+                    {acc.display_name} ({acc.badge})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Anomalies Bell */}
             <button 
               onClick={() => setActiveTab('anomalies')}
               className="relative p-2 text-muted-foreground hover:text-foreground rounded-md hover:bg-secondary transition-colors"
@@ -178,20 +249,67 @@ function InvestigationWorkspace() {
               <Bell className="w-4 h-4" />
               <span className="absolute top-1.5 right-1.5 block h-1.5 w-1.5 rounded-full bg-destructive ring-2 ring-background animate-pulse" />
             </button>
+
+            {/* Theme Toggle */}
             <button 
               onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
               className="p-2 text-muted-foreground hover:text-foreground rounded-md hover:bg-secondary transition-colors"
+              title="Toggle Theme"
             >
               {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
-            <div className="w-px h-5 bg-border mx-2" />
-            <div 
-              onClick={() => setActiveTab('investigations')}
-              className="w-8 h-8 rounded-full bg-secondary border border-border flex items-center justify-center cursor-pointer hover:border-primary transition-colors"
-              title="Investigator Profile"
-            >
-              <User className="w-4 h-4 text-muted-foreground" />
-            </div>
+
+            <div className="w-px h-5 bg-border mx-1" />
+
+            {/* Authenticated Officer Badge OR Login Trigger */}
+            {isAuthenticated && user ? (
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setIsProfileModalOpen(true)}
+                  className="flex items-center gap-2 px-2.5 py-1 bg-secondary/50 hover:bg-secondary border border-border rounded-lg transition-colors group text-left"
+                  title="View Officer Profile, Sessions & Security"
+                >
+                  <div className="w-7 h-7 rounded-full bg-primary/10 border border-primary/30 flex items-center justify-center text-primary group-hover:border-primary transition-colors">
+                    <User className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="hidden xl:flex flex-col">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-foreground truncate max-w-[110px]">
+                        {user.full_name}
+                      </span>
+                      <span className={cn(
+                        "text-[9px] font-bold px-1.5 py-0.2 rounded border font-mono tracking-wider",
+                        role === 'SYSTEM_ADMIN' ? "bg-red-500/15 text-red-400 border-red-500/30" :
+                        role === 'SUPERINTENDENT' || role === 'IPS_OFFICER' ? "bg-amber-500/15 text-amber-400 border-amber-500/30" :
+                        role === 'INSPECTOR' || role === 'SUB_INSPECTOR' ? "bg-cyan-500/15 text-cyan-400 border-cyan-500/30" :
+                        role === 'ANALYST' ? "bg-purple-500/15 text-purple-400 border-purple-500/30" :
+                        "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                      )}>
+                        {user.role_display || user.role}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground font-mono">
+                      {user.employee_id} • {user.unit || 'CCID-HQ'}
+                    </span>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => logout()}
+                  className="p-2 text-muted-foreground hover:text-destructive rounded-md hover:bg-destructive/10 transition-colors"
+                  title="Logout / Terminate Session"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setIsLoginModalOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-xs font-semibold rounded-lg hover:bg-primary/90 transition-colors shadow-sm"
+              >
+                <LogIn className="w-3.5 h-3.5" /> Sign In
+              </button>
+            )}
           </div>
         </header>
 
@@ -206,7 +324,16 @@ function InvestigationWorkspace() {
           )}
 
           {activeTab === 'data-sources' && (
-            <DataIngestionVault onNavigateToPipeline={() => setActiveTab('pipeline')} />
+            <DataIngestionVault 
+              onNavigateToPipeline={() => setActiveTab('pipeline')}
+              onNavigateToGraph={(entityId) => {
+                setFocusAnomalyEntityId(entityId || null);
+                setActiveTab('relationship-graph');
+              }}
+              onNavigateToTimeline={() => setActiveTab('timeline')}
+              onNavigateToMap={() => setActiveTab('geospatial')}
+              onNavigateToFindings={() => setActiveTab('anomalies')}
+            />
           )}
 
           {activeTab === 'pipeline' && (
@@ -228,11 +355,28 @@ function InvestigationWorkspace() {
           )}
 
           {activeTab === 'timeline' && (
-            <TimelineFootprint />
+            <TimelineFootprint 
+              onNavigateToGraph={(entityId) => {
+                setFocusAnomalyEntityId(entityId);
+                setActiveTab('relationship-graph');
+              }}
+              onNavigateToMap={() => {
+                setActiveTab('geospatial');
+              }}
+            />
           )}
 
           {activeTab === 'geospatial' && (
-            <GeospatialMap />
+            <GeospatialMap 
+              onViewOnGraph={(entityId) => {
+                setFocusAnomalyEntityId(entityId);
+                setActiveTab('relationship-graph');
+              }}
+            />
+          )}
+
+          {activeTab === 'cctv' && (
+            <CCTVIntelligenceWorkspace activeCase={activeCase} />
           )}
 
           {activeTab === 'anomalies' && (
@@ -247,6 +391,10 @@ function InvestigationWorkspace() {
 
           {activeTab === 'audit' && (
             <AuditTrailLogs />
+          )}
+
+          {activeTab === 'personnel' && (
+            <UserManagementView />
           )}
 
           {activeTab === 'agentic' && (
@@ -280,6 +428,10 @@ function InvestigationWorkspace() {
         onClose={() => setIsCreateModalOpen(false)} 
       />
 
+      {/* Officer IAM Modals */}
+      <LoginModal />
+      <UserProfileModal />
+
       {/* Command Palette Modal */}
       {cmdOpen && (
         <div className="fixed inset-0 z-50 flex items-start justify-center pt-32 bg-black/40 backdrop-blur-sm" onClick={() => setCmdOpen(false)}>
@@ -297,13 +449,16 @@ function InvestigationWorkspace() {
             <div className="p-2 max-h-[60vh] overflow-y-auto space-y-1">
               <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Quick Actions</div>
               {[
-                { label: 'Create New Case Dossier', action: () => { setCmdOpen(false); setIsCreateModalOpen(true); } },
-                { label: 'Open Multi-Engine Anomaly Radar', action: () => { setCmdOpen(false); setActiveTab('anomalies'); } },
-                { label: 'View Relationship Graph Topology', action: () => { setCmdOpen(false); setActiveTab('relationship-graph'); } },
-                { label: 'View Zingg Entity Resolution', action: () => { setCmdOpen(false); setActiveTab('entity-explorer'); } },
-                { label: 'Ingest Evidence Files', action: () => { setCmdOpen(false); setActiveTab('data-sources'); } },
-                { label: 'Run Processing Pipeline', action: () => { setCmdOpen(false); setActiveTab('pipeline'); } },
-              ].map((cmd, i) => (
+                { label: 'Create New Case Dossier', action: () => { setCmdOpen(false); setIsCreateModalOpen(true); }, perm: 'case.create' },
+                { label: 'Open Multi-Engine Anomaly Radar', action: () => { setCmdOpen(false); setActiveTab('anomalies'); }, perm: 'anomaly.view' },
+                { label: 'View Relationship Graph Topology', action: () => { setCmdOpen(false); setActiveTab('relationship-graph'); }, perm: 'graph.view' },
+                { label: 'View Zingg Entity Resolution', action: () => { setCmdOpen(false); setActiveTab('entity-explorer'); }, perm: 'entity.view' },
+                { label: 'Ingest Evidence Files', action: () => { setCmdOpen(false); setActiveTab('data-sources'); }, perm: 'evidence.upload' },
+                { label: 'Run Processing Pipeline', action: () => { setCmdOpen(false); setActiveTab('pipeline'); }, perm: 'evidence.view' },
+                { label: 'Personnel Directory & IAM', action: () => { setCmdOpen(false); setActiveTab('personnel'); }, perm: 'user.view' },
+                { label: 'Inspect Audit Trail Logs', action: () => { setCmdOpen(false); setActiveTab('audit'); }, perm: 'audit.view' },
+                { label: 'Officer Profile & Active Sessions', action: () => { setCmdOpen(false); setIsProfileModalOpen(true); } },
+              ].filter(item => !item.perm || can(item.perm)).map((cmd, i) => (
                 <button 
                   key={i} 
                   onClick={cmd.action}
@@ -322,8 +477,10 @@ function InvestigationWorkspace() {
 
 export default function Page() {
   return (
-    <CaseProvider>
-      <InvestigationWorkspace />
-    </CaseProvider>
+    <AuthProvider>
+      <CaseProvider>
+        <InvestigationWorkspace />
+      </CaseProvider>
+    </AuthProvider>
   );
 }

@@ -46,14 +46,16 @@ class SynchronousSocialActivityDetector(BaseDetector):
                 not_applicable_reason="No social media activity events recorded."
             )
 
+        import bisect
         my_timestamps = []
         for e in my_social:
             ts = e.get("timestamp")
             if ts:
                 try:
-                    my_timestamps.append(datetime.fromisoformat(ts.replace("Z", "+00:00")))
+                    my_timestamps.append(datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp())
                 except Exception:
                     pass
+        my_timestamps.sort()
 
         correlated_peers = []
         for other_id, other_data in all_entities.items():
@@ -66,16 +68,17 @@ class SynchronousSocialActivityDetector(BaseDetector):
                 ts = e.get("timestamp")
                 if ts:
                     try:
-                        other_ts.append(datetime.fromisoformat(ts.replace("Z", "+00:00")))
+                        other_ts.append(datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp())
                     except Exception:
                         pass
+            other_ts.sort()
 
-            # Count synchronous events within a 120-second delta
+            # Count synchronous events within a 120-second delta using binary search
             sync_hits = 0
             for t1 in my_timestamps:
-                for t2 in other_ts:
-                    if abs((t1 - t2).total_seconds()) <= 120.0:
-                        sync_hits += 1
+                idx_left = bisect.bisect_left(other_ts, t1 - 120.0)
+                idx_right = bisect.bisect_right(other_ts, t1 + 120.0)
+                sync_hits += (idx_right - idx_left)
 
             if sync_hits >= 2:
                 correlated_peers.append({"peer": other_id, "synchronized_events": sync_hits})

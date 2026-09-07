@@ -4,22 +4,34 @@ import React, { useState, useRef } from 'react';
 import { 
   UploadCloud, FileSpreadsheet, Smartphone, CreditCard, Globe, 
   CheckCircle2, AlertCircle, Clock, ShieldCheck, Hash, Play,
-  Loader2, RefreshCw, FileText, ArrowRight
+  Loader2, RefreshCw, FileText, ArrowRight, Radio
 } from 'lucide-react';
 import { useCase } from '../context/CaseContext';
 import { apiClient, EvidenceItem } from '../services/apiClient';
 import { cn } from '../utils/cn';
+import NFCEvidenceScannerModal from './evidence/NFCEvidenceScannerModal';
 
 interface DataIngestionVaultProps {
   onNavigateToPipeline?: () => void;
+  onNavigateToGraph?: (entityId?: string) => void;
+  onNavigateToTimeline?: () => void;
+  onNavigateToMap?: () => void;
+  onNavigateToFindings?: (findingId?: string) => void;
 }
 
-export default function DataIngestionVault({ onNavigateToPipeline }: DataIngestionVaultProps) {
+export default function DataIngestionVault({ 
+  onNavigateToPipeline,
+  onNavigateToGraph,
+  onNavigateToTimeline,
+  onNavigateToMap,
+  onNavigateToFindings
+}: DataIngestionVaultProps) {
   const { activeCase, activeCaseDetail, refreshCases } = useCase();
   const [isUploading, setIsUploading] = useState(false);
   const [isTriggering, setIsTriggering] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isNfcModalOpen, setIsNfcModalOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const evidenceList: EvidenceItem[] = activeCaseDetail?.evidence || [];
@@ -49,24 +61,15 @@ export default function DataIngestionVault({ onNavigateToPipeline }: DataIngesti
     }
   };
 
-  const handleTriggerAll = async () => {
-    setIsTriggering(true);
-    setError(null);
-    try {
-      await apiClient.triggerAllIngestion();
-      await refreshCases();
-      if (onNavigateToPipeline) {
-        onNavigateToPipeline();
-      }
-    } catch (err: any) {
-      setError(err.message || 'Failed to trigger ingestion pipeline');
-    } finally {
-      setIsTriggering(false);
+  const handleGoToPipeline = () => {
+    if (onNavigateToPipeline) {
+      onNavigateToPipeline();
     }
   };
 
   const getSourceIcon = (sourceType: string) => {
     const s = sourceType?.toUpperCase() || '';
+    if (s.includes('NFC')) return Radio;
     if (s.includes('TELECOM') || s.includes('CDR')) return Smartphone;
     if (s.includes('BANK')) return CreditCard;
     if (s.includes('NETWORK') || s.includes('IPDR')) return Globe;
@@ -76,6 +79,7 @@ export default function DataIngestionVault({ onNavigateToPipeline }: DataIngesti
 
   const getSourceColor = (sourceType: string) => {
     const s = sourceType?.toUpperCase() || '';
+    if (s.includes('NFC')) return 'text-cyan-500 bg-cyan-500/10 border-cyan-500/20';
     if (s.includes('TELECOM') || s.includes('CDR')) return 'text-indigo-500 bg-indigo-500/10 border-indigo-500/20';
     if (s.includes('BANK')) return 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20';
     if (s.includes('NETWORK') || s.includes('IPDR')) return 'text-blue-500 bg-blue-500/10 border-blue-500/20';
@@ -108,11 +112,18 @@ export default function DataIngestionVault({ onNavigateToPipeline }: DataIngesti
           </div>
           <h2 className="text-2xl font-bold text-foreground">Evidence Intake & Automatic Classification</h2>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Upload unlabelled raw evidence. The backend computes SHA-256 hashes, encrypts with AES-256-GCM, and auto-detects domain schemas.
+            Upload unlabelled raw evidence or acquire physical NFC evidence. The backend computes SHA-256 hashes, encrypts with AES-256-GCM, and auto-detects domain schemas.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => setIsNfcModalOpen(true)}
+            className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 text-white text-sm font-medium rounded-lg hover:from-cyan-500 hover:to-blue-500 transition-all flex items-center gap-2 shadow-sm"
+          >
+            <Radio className="w-4 h-4 animate-pulse text-cyan-200" />
+            Scan NFC Evidence
+          </button>
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={isUploading}
@@ -121,14 +132,15 @@ export default function DataIngestionVault({ onNavigateToPipeline }: DataIngesti
             {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
             Upload Evidence Files
           </button>
-          <button
-            onClick={handleTriggerAll}
-            disabled={isTriggering}
-            className="px-4 py-2 bg-secondary text-foreground border border-border text-sm font-medium rounded-lg hover:bg-secondary/80 transition-colors flex items-center gap-2 disabled:opacity-50"
-          >
-            {isTriggering ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 text-emerald-500" />}
-            Process All Files
-          </button>
+          {evidenceList.length > 0 && onNavigateToPipeline && (
+            <button
+              onClick={handleGoToPipeline}
+              className="px-4 py-2 bg-secondary text-foreground border border-border text-sm font-medium rounded-lg hover:bg-secondary/80 transition-colors flex items-center gap-2 shadow-sm"
+            >
+              <Play className="w-4 h-4 text-emerald-500" />
+              Go to Processing Pipeline
+            </button>
+          )}
         </div>
       </div>
 
@@ -281,6 +293,23 @@ export default function DataIngestionVault({ onNavigateToPipeline }: DataIngesti
           Browse Local Files
         </button>
       </div>
+
+      {/* Forensic Crime Scene NFC Evidence Scanner Modal */}
+      {isNfcModalOpen && (
+        <NFCEvidenceScannerModal
+          isOpen={isNfcModalOpen}
+          onClose={() => setIsNfcModalOpen(false)}
+          caseId={activeCase.case_id}
+          caseReference={activeCase.case_reference}
+          onAcquisitionComplete={async () => {
+            await refreshCases();
+          }}
+          onNavigateToGraph={onNavigateToGraph}
+          onNavigateToTimeline={onNavigateToTimeline}
+          onNavigateToMap={onNavigateToMap}
+          onNavigateToFindings={onNavigateToFindings}
+        />
+      )}
     </div>
   );
 }

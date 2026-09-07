@@ -1,0 +1,56 @@
+﻿Fetching versions.json for Plugin 'graph-data-science' from https://graphdatascience.ninja/versions.json
+Installing Plugin 'graph-data-science' from https://graphdatascience.ninja/neo4j-graph-data-science-2.6.9.jar to /plugins/graph-data-science.jar 
+Applying default values for plugin graph-data-science to neo4j.conf
+Skipping dbms.security.procedures.unrestricted for plugin graph-data-science because it is already set.
+You may need to add gds.* to the dbms.security.procedures.unrestricted setting in your configuration file.
+Changed password for user 'neo4j'. IMPORTANT: this change will only take effect if performed before the database is started for the first time.
+Installing Plugin 'apoc' from /var/lib/neo4j/labs/apoc-*-core.jar to /plugins/apoc.jar
+Applying default values for plugin apoc to neo4j.conf
+Skipping dbms.security.procedures.unrestricted for plugin apoc because it is already set.
+You may need to add apoc.* to the dbms.security.procedures.unrestricted setting in your configuration file.
+Fetching versions.json for Plugin 'graph-data-science' from https://graphdatascience.ninja/versions.json
+Installing Plugin 'graph-data-science' from https://graphdatascience.ninja/neo4j-graph-data-science-2.6.9.jar to /plugins/graph-data-science.jar 
+Applying default values for plugin graph-data-science to neo4j.conf
+docker : Neo4j is already running (pid:7).
+At line:1 char:1
++ docker logs --tail 50 cyber_neo4j 2>&1 | Out-File -FilePath neo4j_log ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Neo4j is already running (pid:7).:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Run with '--verbose' for a more detailed error message.
+Skipping dbms.security.procedures.unrestricted for plugin graph-data-science because it is already set.
+You may need to add gds.* to the dbms.security.procedures.unrestricted setting in your configuration file.
+Changed password for user 'neo4j'. IMPORTANT: this change will only take effect if performed before the database is started for the first time.
+Neo4j is already running (pid:7).
+Run with '--verbose' for a more detailed error message.
+Installing Plugin 'apoc' from /var/lib/neo4j/labs/apoc-*-core.jar to /plugins/apoc.jar
+Applying default values for plugin apoc to neo4j.conf
+Skipping dbms.security.procedures.unrestricted for plugin apoc because it is already set.
+You may need to add apoc.* to the dbms.security.procedures.unrestricted setting in your configuration file.
+Fetching versions.json for Plugin 'graph-data-science' from https://graphdatascience.ninja/versions.json
+Installing Plugin 'graph-data-science' from https://graphdatascience.ninja/neo4j-graph-data-science-2.6.9.jar to /plugins/graph-data-science.jar 
+Applying default values for plugin graph-data-science to neo4j.conf
+Skipping dbms.security.procedures.unrestricted for plugin graph-data-science because it is already set.
+You may need to add gds.* to the dbms.security.procedures.unrestricted setting in your configuration file.
+Changed password for user 'neo4j'. IMPORTANT: this change will only take effect if performed before the database is started for the first time.
+2026-09-06 10:27:42.688+0000 INFO  Logging config in use: File '/var/lib/neo4j/conf/user-logs.xml'
+2026-09-06 10:27:43.659+0000 INFO  Starting...
+2026-09-06 10:28:09.140+0000 INFO  This instance is ServerId{2ca46ea0} (2ca46ea0-03a5-4100-99e9-d796081fa9cd)
+2026-09-06 10:28:34.263+0000 INFO  ======== Neo4j 5.12.0 ========
+2026-09-06 10:28:47.346+0000 INFO  Progress tracking: enabled
+2026-09-06 10:28:47.366+0000 INFO  Memory usage guard: minimum estimate
+2026-09-06 10:28:47.468+0000 INFO  GDS license file: null
+2026-09-06 10:28:47.480+0000 INFO  GDS license state: unlicensed
+2026-09-06 10:28:47.656+0000 INFO  Register GraphDataScience...
+2026-09-06 10:28:49.384+0000 INFO  GraphDataScience registered.
+2026-09-06 10:28:49.388+0000 INFO  Register GraphDataScienceExtras...
+2026-09-06 10:28:49.407+0000 INFO  GraphDataScienceExtras registered.
+2026-09-06 10:28:49.409+0000 INFO  Register MetricsFacade...
+2026-09-06 10:28:49.431+0000 INFO  MetricsFacade registered.
+2026-09-06 10:28:49.438+0000 INFO  Register legacy Task Store/ Registry...
+2026-09-06 10:28:49.483+0000 INFO  Task Store/ Registry registered.
+2026-09-06 10:28:49.488+0000 INFO  Register legacy User Log Registry...
+2026-09-06 10:28:49.500+0000 INFO  User Log Registry registered.
+2026-09-06 10:28:58.141+0000 INFO  GDS compatibility: for Neo4j Settings 5.x -- available, for Neo4j Settings 4.4 -- not available, selected: Neo4j Settings 5.x
+2026-09-06 10:28:58.145+0000 INFO  GDS compatibility: for Neo4j 4.4 -- not available, for Neo4j 5.11 -- not available, for Neo4j 5.12 -- available, for Neo4j 5.13 -- not available, for Neo4j 5.14 -- not available, for Neo4j 5.15 -- not available, for Neo4j 5.16 -- not available, for Neo4j 5.17 -- not available, for Neo4j 5.18 -- not available, for Neo4j 5.19 -- not available, for Neo4j 5.20 -- not available, selected: Neo4j 5.12

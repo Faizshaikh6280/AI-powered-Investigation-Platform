@@ -30,11 +30,11 @@ export default function OverviewDashboard({ onNavigateTab }: OverviewDashboardPr
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [profiles, graph, aStats, geoData] = await Promise.all([
-        apiClient.getGoldenProfiles().catch(() => []),
-        apiClient.getGraphTopology().catch(() => ({ nodes: [], edges: [] })),
-        apiClient.getAnomalyStats().catch(() => ({ total: 0, critical: 0, high: 0, medium: 0, low: 0 })),
-        apiClient.getGeoSyncData().catch(() => ({ timeline: [], waypoints: [] }))
+      const [profiles, graph, aStats, rawEvents] = await Promise.all([
+        apiClient.getGoldenProfiles(activeCase?.case_id).catch(() => []),
+        apiClient.getGraphTopology(activeCase?.case_id).catch(() => ({ nodes: [], edges: [] })),
+        apiClient.getAnomalyStats(activeCase?.case_id).catch(() => ({ total: 0, critical: 0, high: 0, medium: 0, low: 0 })),
+        apiClient.getIngestedEvents(activeCase?.case_id, 6).catch(() => [])
       ]);
 
       setStats({
@@ -45,7 +45,31 @@ export default function OverviewDashboard({ onNavigateTab }: OverviewDashboardPr
       });
       setAnomalyStats(aStats);
       setTopProfiles(profiles.slice(0, 5));
-      setRecentEvents(geoData.timeline?.slice(0, 6) || []);
+
+      const mappedEvents: TimelineEventItem[] = (rawEvents || []).map((r: any) => ({
+        id: r.event_id || Math.random().toString(),
+        time_ms: r.timestamp ? new Date(r.timestamp).getTime() : Date.now(),
+        domain: r.domain || r.source_type || 'UNKNOWN',
+        event_type: r.event_type || 'EVENT',
+        identity: {
+          phone: r.normalized_identity?.phone,
+          name: r.normalized_identity?.name,
+          social_handle: r.normalized_identity?.social_handle
+        },
+        financial: {
+          account_number: r.financial?.account_number,
+          amount_inr: r.financial?.amount_inr,
+          txn_type: r.financial?.txn_type
+        },
+        telemetry: {
+          client_ip: r.telemetry?.assigned_ip,
+          tower_address: r.telemetry?.address,
+          destination_ip: r.telemetry?.destination_ip,
+          lat: r.telemetry?.lat,
+          lng: r.telemetry?.lng
+        }
+      }));
+      setRecentEvents(mappedEvents);
     } catch (err) {
       console.error('Failed to load overview data:', err);
     } finally {
@@ -55,7 +79,7 @@ export default function OverviewDashboard({ onNavigateTab }: OverviewDashboardPr
 
   useEffect(() => {
     loadData();
-  }, [activeCase?.case_id, activeCaseDetail]);
+  }, [activeCase?.case_id]);
 
   const getDomainIcon = (domain: string) => {
     switch (domain?.toUpperCase()) {

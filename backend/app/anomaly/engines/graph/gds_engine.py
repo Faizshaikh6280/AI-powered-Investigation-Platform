@@ -1,4 +1,4 @@
-﻿from typing import Dict, Any, List
+from typing import Dict, Any, List
 import networkx as nx
 from app.anomaly.engines.base import BaseDetector
 from app.anomaly.schemas.anomaly_contracts import (
@@ -33,17 +33,24 @@ class GraphDataScienceEngine(BaseDetector):
         meta = self.get_metadata()
         all_entity_store = context.get("all_entity_store", {})
 
-        # Build in-memory NetworkX Graph
-        G = nx.Graph()
-        for eid, edata in all_entity_store.items():
-            G.add_node(eid)
-            # Link entities based on shared events
-            events_a = set(edata.get("event_ids", []))
-            for other_eid, other_edata in all_entity_store.items():
-                if eid != other_eid:
-                    events_b = set(other_edata.get("event_ids", []))
-                    if len(events_a.intersection(events_b)) > 0:
-                        G.add_edge(eid, other_eid)
+        # Build in-memory NetworkX Graph (cached across entities in run context)
+        G = context.get("_gds_nx_graph")
+        if G is None:
+            G = nx.Graph()
+            for eid in all_entity_store:
+                G.add_node(eid)
+            for eid, edata in all_entity_store.items():
+                # Add banking transfer edges
+                for ev in edata.get("events_by_domain", {}).get("BANKING", []):
+                    cparty = ev.get("financial", {}).get("counterparty") or ev.get("attributes", {}).get("to_account")
+                    if cparty and cparty in all_entity_store and cparty != eid:
+                        G.add_edge(eid, cparty)
+                # Add communication edges
+                for ev in edata.get("events_by_domain", {}).get("TELECOM", []):
+                    dest = ev.get("telemetry", {}).get("destination") or ev.get("attributes", {}).get("called_number")
+                    if dest and dest in all_entity_store and dest != eid:
+                        G.add_edge(eid, dest)
+            context["_gds_nx_graph"] = G
 
         if len(G.nodes) == 0:
             return DetectorExecutionResult(

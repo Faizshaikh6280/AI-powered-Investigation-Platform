@@ -1,17 +1,38 @@
-from fastapi import APIRouter
+from typing import Optional
+from fastapi import APIRouter, Depends, Request
+from sqlalchemy.orm import Session
 from app.services.zingg_er import run_entity_resolution
+from app.core.database import get_db
+from app.models.iam_models import UserModel
+from app.authorization.dependencies import require_permission, get_client_ip
+from app.authorization.permissions import Permissions
+from app.audit.audit_service import record_audit_event, AuditAction
 
 router = APIRouter()
 
 @router.post("/execute")
-async def execute_entity_resolution():
+def execute_entity_resolution(
+    case_id: Optional[str] = None,
+    request: Request = None,
+    current_user: UserModel = Depends(require_permission(Permissions.ENTITY_RESOLVE)),
+    db: Session = Depends(get_db)
+):
     """
-    Run full Entity Resolution pipeline on data files:
-    1. Reads raw_entities_profiles.csv
-    2. Normalizes phone numbers to E.164
-    3. Clusters by national_id + phone (Zingg Docker if available, else deterministic union-find)
-    4. Writes GoldenProfiles to MongoDB
-    5. Backfills z_cluster_id on all normalized_events
+    Run full Entity Resolution pipeline on canonical events for case_id.
     """
-    result = await run_entity_resolution()
+    result = run_entity_resolution(case_id=case_id)
+
+    record_audit_event(
+        action=AuditAction.ENTITY_RESOLVED,
+        result="SUCCESS",
+        user_id=current_user.id,
+        actor=current_user.official_email,
+        role=current_user.role.name if current_user.role else None,
+        case_id=case_id,
+        details={"case_id": case_id},
+        ip_address=get_client_ip(request) if request else None,
+        db=db
+    )
+
     return result
+

@@ -42,21 +42,35 @@ class SocialParser(BaseParser):
             timestamp = self.clean_date(row.get("timestamp") or row.get("created_at") or row.get("date"))
 
             entities = CanonicalEntities(
+                name=str(row.get("name") or "").strip() or None,
                 social_handle=str(row.get("user_handle") or row.get("handle") or "").strip(),
                 social_platform=str(row.get("platform") or "SocialMedia").strip(),
                 phone=phone
             )
 
+            location_str = str(row.get("location") or "").strip() or None
+
             telemetry = CanonicalTelemetry(
-                assigned_ip=str(row.get("client_ip") or row.get("ip")).strip() if row.get("client_ip") or row.get("ip") else None
+                assigned_ip=str(row.get("client_ip") or "").strip() if row.get("client_ip") else None,
+                destination_ip=str(row.get("ip") or row.get("destination_ip") or "").strip() or None,
+                address=location_str
             )
 
             financial = CanonicalFinancial()
 
             attributes = {
-                "log_id": row.get("log_id", f"SOC-{idx}"),
-                "action": row.get("action", "ACTIVITY"),
-                "device_id": row.get("device_id")
+                "social_id": row.get("social_id") or row.get("post_id") or row.get("log_id", f"SOC-{idx}"),
+                "record_id": row.get("social_id") or row.get("post_id") or row.get("log_id", f"SOC-{idx}"),
+                "log_id": row.get("social_id") or row.get("post_id") or row.get("log_id", f"SOC-{idx}"),
+                "post_id": row.get("social_id") or row.get("post_id") or row.get("log_id"),
+                "action": row.get("activity") or row.get("action_type") or row.get("action", "ACTIVITY"),
+                "activity": row.get("activity") or row.get("action_type") or row.get("action", "ACTIVITY"),
+                "action_type": row.get("activity") or row.get("action_type") or row.get("action", "ACTIVITY"),
+                "device_id": str(row.get("device") or row.get("device_id") or "").strip() or None,
+                "group_id": str(row.get("group_id") or "").strip() or None,
+                "ip": str(row.get("ip") or "").strip() or None,
+                "location": location_str,
+                "content_metadata": row.get("content_metadata")
             }
 
             provenance = EventProvenance(
@@ -69,6 +83,7 @@ class SocialParser(BaseParser):
             )
 
             events.append(CanonicalEvent(
+                event_id=str(attributes["record_id"]).strip(),
                 case_id=case_id,
                 evidence_id=evidence_id,
                 event_type="SOCIAL_ACTIVITY",

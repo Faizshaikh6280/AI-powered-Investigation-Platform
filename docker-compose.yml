@@ -67,10 +67,12 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: cyber_investigation_backend
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
     environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
       - DATABASE_URL=postgresql://postgres:postgres123@postgres:5432/investigation_db
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=minioadmin
@@ -162,7 +164,6 @@ services:
     volumes:
       - mongo_data:/data/db
     restart: always
-
   neo4j:
     image: neo4j:5.12-community
     container_name: cyber_neo4j
@@ -171,8 +172,11 @@ services:
       - "7687:7687"
     environment:
       - NEO4J_AUTH=neo4j/password123
-      - NEO4J_PLUGINS=["apoc", "graph-data-science"]
-      - NEO4J_dbms_security_procedures_unrestricted=apoc.*,gds.*
+      - NEO4J_server_default__listen__address=0.0.0.0
+      - NEO4J_server_default__advertised__address=127.0.0.1
+      - NEO4J_server_memory_heap_initial__size=128m
+      - NEO4J_server_memory_heap_max__size=256m
+      - NEO4J_server_memory_pagecache_size=64m
     volumes:
       - neo4j_data:/data
     restart: always
@@ -196,6 +200,7 @@ services:
 volumes:
   postgres_data:
   minio_data:
-  mongo_data:
   neo4j_data:
+  neo4j_plugins:
   ollama_data:
+  mongo_data:

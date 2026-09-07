@@ -34,8 +34,11 @@ class DarkPeriodDetector(BaseDetector):
         entity_data: Dict[str, Any],
         context: Dict[str, Any]
     ) -> DetectorExecutionResult:
-        meta = self.get_metadata()
-        events = entity_data.get("all_events", [])
+        # Telemetry/radio silence requires telecom or cellular tower transmissions
+        events = [
+            e for e in entity_data.get("all_events", [])
+            if any(d in str(e.get("domain") or e.get("source_type", "")).upper() for d in ("TELECOM", "NETWORK"))
+        ]
 
         timestamps = []
         for e in events:
@@ -46,7 +49,7 @@ class DarkPeriodDetector(BaseDetector):
                 except Exception:
                     pass
 
-        if len(timestamps) < 3:
+        if len(timestamps) < 20:
             return DetectorExecutionResult(
                 detector_id=meta.detector_id,
                 detector_type=meta.detector_type,
@@ -54,7 +57,7 @@ class DarkPeriodDetector(BaseDetector):
                 entity_id=entity_id,
                 case_id=case_id,
                 domain=meta.domain,
-                not_applicable_reason="Insufficient chronological events to establish baseline ping frequency."
+                not_applicable_reason="Insufficient chronological events (requires >= 20 events) to establish baseline ping frequency."
             )
 
         timestamps.sort()
@@ -62,10 +65,10 @@ class DarkPeriodDetector(BaseDetector):
 
         median_interval = float(np.median(intervals_hours))
         max_interval = float(np.max(intervals_hours))
-        threshold_hours = anomaly_config.spatial.signal_silence_threshold_hours
+        threshold_hours = max(36.0, anomaly_config.spatial.signal_silence_threshold_hours)
 
         # Flag if maximum gap is significantly larger than threshold and baseline interval
-        is_flagged = bool(max_interval >= threshold_hours and max_interval >= 3.0 * max(0.5, median_interval))
+        is_flagged = bool(max_interval >= threshold_hours and max_interval >= 5.0 * max(1.0, median_interval))
 
         if not is_flagged:
             return DetectorExecutionResult(

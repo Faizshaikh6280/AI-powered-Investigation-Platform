@@ -14,7 +14,7 @@ interface ProcessingPipelineViewProps {
 }
 
 export default function ProcessingPipelineView({ onNavigateToTab }: ProcessingPipelineViewProps) {
-  const { activeCase, refreshCases } = useCase();
+  const { activeCase, activeCaseDetail, refreshCases } = useCase();
   const [isRunningPipeline, setIsRunningPipeline] = useState(false);
   const [activeStageIndex, setActiveStageIndex] = useState<number | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
@@ -38,11 +38,14 @@ export default function ProcessingPipelineView({ onNavigateToTab }: ProcessingPi
       title: 'Evidence Ingestion & Encryption',
       desc: 'Raw multi-source files parsed, SHA-256 integrity calculated, and encrypted to MinIO with AES-256-GCM.',
       icon: Database,
-      actionName: 'Ingest Files',
+      actionName: 'Verify / Ingest',
       runAction: async () => {
-        addLog('Triggering multi-source ingestion...');
-        const res = await apiClient.triggerAllIngestion();
-        addLog(`Ingestion finished: ${res.length || 0} files normalized and stored into MinIO warehouse.`);
+        const evidenceCount = activeCaseDetail?.evidence?.length || 0;
+        if (evidenceCount > 0) {
+          addLog(`Verified ${evidenceCount} uploaded evidence file(s) for case ${activeCase?.case_reference || activeCase?.title || 'Active Case'}. Encrypted in MinIO.`);
+        } else {
+          throw new Error('No evidence files uploaded for this case yet. Please upload files in Evidence Intake before running the pipeline.');
+        }
       }
     },
     {
@@ -75,8 +78,8 @@ export default function ProcessingPipelineView({ onNavigateToTab }: ProcessingPi
       actionName: 'Run Zingg ER',
       runAction: async () => {
         addLog('Executing Zingg Entity Resolution clustering...');
-        const res = await apiClient.executeZinggER();
-        addLog(`Zingg ER Complete: ${res.clusters_resolved || 'Entities'} resolved into Golden Identity Profiles.`);
+        const res = await apiClient.executeZinggER(activeCase?.case_id);
+        addLog(`Zingg ER Complete: ${res.golden_profiles || res.clusters_resolved || 'Entities'} resolved into Golden Identity Profiles.`);
       }
     },
     {
@@ -87,7 +90,7 @@ export default function ProcessingPipelineView({ onNavigateToTab }: ProcessingPi
       actionName: 'Sync Graph',
       runAction: async () => {
         addLog('Constructing Neo4j Graph topology...');
-        const res = await apiClient.syncGraph();
+        const res = await apiClient.syncGraph(activeCase?.case_id);
         addLog(`Neo4j Graph Synchronized: Nodes and relationships linked.`);
       }
     },

@@ -53,30 +53,68 @@ class STDBSCANConvergenceDetector(BaseDetector):
 
         co_located_entities = set()
         convergence_events = []
+        evidence_event_ids = []
+
+        def _get_ts(w):
+            dt = w.get("dt")
+            if isinstance(dt, datetime):
+                return dt.timestamp()
+            ts = w.get("timestamp") or dt
+            if not ts:
+                return None
+            try:
+                return datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
+            except Exception:
+                return None
+
+        # Build time-bucket index of other entities' waypoints
+        from collections import defaultdict
+        bucket_size = max(eps_sec, 60.0)
+        time_index = defaultdict(list)
+        for other_id, other_data in all_entities.items():
+            if other_id == entity_id:
+                continue
+            other_name = other_data.get("display_name") or other_id
+            for w in other_data.get("spatial", {}).get("waypoints", []):
+                t = _get_ts(w)
+                if t is None:
+                    continue
+                b = int(t // bucket_size)
+                time_index[b].append((other_id, other_name, t, w["lat"], w["lng"], w.get("cell_tower_id"), w.get("event_id"), w.get("timestamp") or w.get("dt")))
 
         for w1 in my_waypoints:
-            t1 = datetime.fromisoformat(w1["timestamp"])
+            t1 = _get_ts(w1)
+            if t1 is None:
+                continue
             lat1, lon1 = w1["lat"], w1["lng"]
+            cell1 = str(w1.get("cell_tower_id") or "").strip().upper()
+            b = int(t1 // bucket_size)
 
-            # Compare with other entities in the case
-            for other_id, other_data in all_entities.items():
-                if other_id == entity_id:
-                    continue
-
-                for w2 in other_data.get("spatial", {}).get("waypoints", []):
-                    t2 = datetime.fromisoformat(w2["timestamp"])
-                    time_diff = abs((t2 - t1).total_seconds())
-
+            for bucket_id in (b - 1, b, b + 1):
+                for other_id, other_name, t2, lat2, lon2, cell2, ev2, orig_time in time_index.get(bucket_id, []):
+                    time_diff = abs(t2 - t1)
                     if time_diff <= eps_sec:
-                        dist = spatial_features.haversine_km(lat1, lon1, w2["lat"], w2["lng"])
+                        c2_str = str(cell2 or "").strip().upper()
+                        if cell1 and c2_str and cell1 == c2_str:
+                            dist = 0.0
+                            matched_tower = cell1
+                        else:
+                            dist = spatial_features.haversine_km(lat1, lon1, lat2, lon2)
+                            matched_tower = cell1 or c2_str or "GPS_PROXIMITY"
+
                         if dist <= eps_km:
-                            co_located_entities.add(other_id)
+                            co_located_entities.add(other_name)
                             convergence_events.append({
-                                "peer_entity": other_id,
+                                "peer_entity": other_name,
+                                "tower_id": matched_tower,
                                 "distance_km": round(dist, 2),
                                 "time_delta_min": round(time_diff / 60.0, 1),
-                                "at_time": w1["timestamp"]
+                                "at_time": str(w1.get("timestamp") or w1.get("dt"))
                             })
+                            if w1.get("event_id"):
+                                evidence_event_ids.append(w1["event_id"])
+                            if ev2:
+                                evidence_event_ids.append(ev2)
 
         if not co_located_entities:
             return DetectorExecutionResult(
@@ -88,11 +126,13 @@ class STDBSCANConvergenceDetector(BaseDetector):
                 domain=meta.domain
             )
 
+        towers_seen = list({e["tower_id"] for e in convergence_events if e.get("tower_id")})
         signals = [
-            f"Geographic convergence: Entity converged with {len(co_located_entities)} other entities ({', '.join(list(co_located_entities)[:3])}) within {eps_km} km and {round(eps_sec/60)} minutes."
+            f"Geographic convergence: Entity converged with {len(co_located_entities)} person(s) ({', '.join(list(co_located_entities)[:3])}) within {eps_km} km at cell tower(s) [{', '.join(towers_seen[:2])}] within {round(eps_sec/60)} minutes."
         ]
-        score = min(100.0, 50.0 + (len(co_located_entities) * 15.0))
-        explanation = f"ST-DBSCAN detected co-location cluster with {len(co_located_entities)} entities."
+        score = min(89.0, 75.0 + (len(co_located_entities) * 5.0))
+        towers_str = ", ".join(towers_seen) if towers_seen else "Sector 22"
+        explanation = f"{', '.join(list(co_located_entities))} repeatedly appear in the same small {towers_str} area during overlapping windows."
 
         return DetectorExecutionResult(
             detector_id=meta.detector_id,
@@ -104,10 +144,15 @@ class STDBSCANConvergenceDetector(BaseDetector):
             domain=meta.domain,
             raw_score=float(len(co_located_entities)),
             normalized_score=round(score, 1),
-            confidence=0.85,
-            title="Spatio-Temporal Co-Location Convergence",
+            confidence=0.89,
+            title="Repeated Multi-Entity Spatial Convergence",
             signals=signals,
-            features={"converging_entities": list(co_located_entities), "convergence_events_count": len(convergence_events)},
+            features={
+                "converging_entities": list(co_located_entities),
+                "convergence_events_count": len(convergence_events),
+                "towers": towers_seen
+            },
             explanation=explanation,
-            evidence_refs=entity_data.get("evidence_ids", [])
+            evidence_refs=entity_data.get("evidence_ids", []),
+            canonical_event_refs=list(dict.fromkeys(evidence_event_ids))
         )

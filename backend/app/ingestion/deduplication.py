@@ -17,6 +17,7 @@ class IngestionDeduplicator:
             event.source_type or "",
             event.event_type or "",
             event.timestamp or "",
+            event.entities.name or "",
             event.entities.phone or "",
             event.entities.national_id or "",
             event.entities.social_handle or "",
@@ -26,7 +27,8 @@ class IngestionDeduplicator:
             event.telemetry.imei or "",
             event.telemetry.cell_tower_id or "",
             event.telemetry.assigned_ip or "",
-            event.telemetry.destination_ip or ""
+            event.telemetry.destination_ip or "",
+            str((event.attributes or {}).get("record_id", ""))
         ]
         composite_str = "|".join(components)
         return hashlib.sha256(composite_str.encode('utf-8')).hexdigest()

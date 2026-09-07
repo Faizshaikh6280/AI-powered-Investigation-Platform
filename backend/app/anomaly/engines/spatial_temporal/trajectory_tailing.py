@@ -37,8 +37,9 @@ class TrajectoryTailingDetector(BaseDetector):
         meta = self.get_metadata()
         all_entities = context.get("all_entity_store", {})
         my_waypoints = entity_data.get("spatial", {}).get("waypoints", [])
+        total_dist = float(entity_data.get("spatial", {}).get("total_distance_km", 0.0))
 
-        if len(my_waypoints) < 2:
+        if len(my_waypoints) < 3 or total_dist < 1.0:
             return DetectorExecutionResult(
                 detector_id=meta.detector_id,
                 detector_type=meta.detector_type,
@@ -46,12 +47,33 @@ class TrajectoryTailingDetector(BaseDetector):
                 entity_id=entity_id,
                 case_id=case_id,
                 domain=meta.domain,
-                not_applicable_reason="Insufficient waypoints for trajectory modeling."
+                not_applicable_reason="Insufficient movement trajectory points for tailing detection."
             )
 
         tailing_detected = []
         max_proximity = anomaly_config.spatial.trajectory_tailing_distance_km
         max_lag = anomaly_config.spatial.trajectory_tailing_lag_seconds
+
+        def _get_ts(w):
+            dt = w.get("dt")
+            if isinstance(dt, datetime):
+                return dt.timestamp()
+            ts = w.get("timestamp") or dt
+            if not ts:
+                return None
+            try:
+                return datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
+            except Exception:
+                return None
+
+        my_parsed = []
+        for w in my_waypoints:
+            t = _get_ts(w)
+            if t is not None:
+                my_parsed.append((t, w["lat"], w["lng"]))
+
+        from collections import defaultdict
+        bucket_size = max(max_lag, 60.0)
 
         for other_id, other_data in all_entities.items():
             if other_id == entity_id:
@@ -61,17 +83,28 @@ class TrajectoryTailingDetector(BaseDetector):
             if len(other_wp) < 2:
                 continue
 
+            time_index = defaultdict(list)
+            for w in other_wp:
+                t = _get_ts(w)
+                if t is not None:
+                    b = int(t // bucket_size)
+                    time_index[b].append((t, w["lat"], w["lng"]))
+
             matching_segments = 0
-            for w1 in my_waypoints:
-                t1 = datetime.fromisoformat(w1["timestamp"])
-                for w2 in other_wp:
-                    t2 = datetime.fromisoformat(w2["timestamp"])
-                    lag = (t1 - t2).total_seconds()
-                    # Check if w1 is trailing w2 within lag window
-                    if 0 <= lag <= max_lag:
-                        dist = spatial_features.haversine_km(w1["lat"], w1["lng"], w2["lat"], w2["lng"])
-                        if dist <= max_proximity:
-                            matching_segments += 1
+            for t1, lat1, lon1 in my_parsed:
+                b = int(t1 // bucket_size)
+                for bucket_id in (b - 1, b):
+                    for t2, lat2, lon2 in time_index.get(bucket_id, []):
+                        lag = t1 - t2
+                        if 0 <= lag <= max_lag:
+                            dist = spatial_features.haversine_km(lat1, lon1, lat2, lon2)
+                            if dist <= max_proximity:
+                                matching_segments += 1
+                                break
+                    if matching_segments >= 2:
+                        break
+                if matching_segments >= 2:
+                    break
 
             if matching_segments >= 2:
                 tailing_detected.append({

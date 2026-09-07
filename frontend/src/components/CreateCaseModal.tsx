@@ -154,3 +154,5 @@ export default function CreateCaseModal({ isOpen, onClose }: CreateCaseModalProp
     </div>
   );
 }
+
+export { CreateCaseModal };

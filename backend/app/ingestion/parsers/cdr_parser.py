@@ -39,13 +39,19 @@ class CDRParser(BaseParser):
             rows = list(reader)
 
         for idx, row in enumerate(rows, start=1):
-            calling_phone = self.clean_phone(row.get("calling_number") or row.get("caller") or row.get("phone_number"))
-            called_phone = self.clean_phone(row.get("called_number") or row.get("callee"))
-            timestamp = self.clean_date(row.get("start_time") or row.get("timestamp") or row.get("date_time"))
+            calling_phone = self.clean_phone(
+                row.get("calling_number") or row.get("caller") or row.get("phone_number") or
+                row.get("caller_phone") or row.get("caller_number") or row.get("source_phone") or row.get("a_party")
+            )
+            called_phone = self.clean_phone(
+                row.get("called_number") or row.get("callee") or row.get("receiver_phone") or
+                row.get("receiver_number") or row.get("destination_phone") or row.get("b_party")
+            )
+            timestamp = self.clean_date(row.get("start_time") or row.get("timestamp") or row.get("date_time") or row.get("date"))
 
             lat = self.parse_float(row.get("tower_lat") or row.get("lat"))
             lng = self.parse_float(row.get("tower_lng") or row.get("lng"))
-            duration = int(self.parse_float(row.get("duration_seconds") or row.get("duration"), 0.0))
+            duration = int(self.parse_float(row.get("duration_seconds") or row.get("duration_sec") or row.get("duration") or row.get("call_duration"), 0.0))
 
             entities = CanonicalEntities(
                 name=row.get("caller_subscriber_name") or row.get("subscriber_name"),
@@ -53,9 +59,12 @@ class CDRParser(BaseParser):
                 counterparty_name=row.get("called_subscriber_name")
             )
 
+            cell_id_val = str(row.get("cell_id") or row.get("cell_tower_id") or row.get("tower_id") or "").strip() or None
+            imei_val = str(row.get("imei") or "").strip() or None
+
             telemetry = CanonicalTelemetry(
-                imei=str(row.get("imei")).strip() if row.get("imei") else None,
-                cell_tower_id=str(row.get("cell_tower_id")).strip() if row.get("cell_tower_id") else None,
+                imei=imei_val,
+                cell_tower_id=cell_id_val,
                 lat=lat if lat != 0.0 else None,
                 lng=lng if lng != 0.0 else None,
                 address=row.get("tower_address") or row.get("address"),
@@ -68,7 +77,11 @@ class CDRParser(BaseParser):
             attributes = {
                 "called_number": called_phone,
                 "call_type": row.get("call_type", "VOICE_OUT"),
-                "call_id": row.get("call_id", f"CDR-{idx}")
+                "cdr_id": row.get("cdr_id") or row.get("call_id", f"CDR-{idx}"),
+                "call_id": row.get("cdr_id") or row.get("call_id", f"CDR-{idx}"),
+                "record_id": row.get("cdr_id") or row.get("call_id", f"CDR-{idx}"),
+                "imsi": str(row.get("imsi") or "").strip() or None,
+                "device_id": str(row.get("device_id") or "").strip() or None
             }
 
             provenance = EventProvenance(
@@ -81,6 +94,7 @@ class CDRParser(BaseParser):
             )
 
             events.append(CanonicalEvent(
+                event_id=str(attributes["record_id"]).strip(),
                 case_id=case_id,
                 evidence_id=evidence_id,
                 event_type="CALL",

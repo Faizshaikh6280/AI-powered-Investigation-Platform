@@ -38,14 +38,16 @@ class IPDRParser(BaseParser):
             rows = list(reader)
 
         for idx, row in enumerate(rows, start=1):
-            phone = self.clean_phone(row.get("phone_number") or row.get("calling_number") or row.get("phone"))
+            phone = self.clean_phone(row.get("subscriber_id") or row.get("phone_number") or row.get("calling_number") or row.get("phone"))
             timestamp = self.clean_date(row.get("start_time") or row.get("timestamp") or row.get("session_start"))
 
             lat = self.parse_float(row.get("tower_lat") or row.get("lat"))
             lng = self.parse_float(row.get("tower_lng") or row.get("lng"))
-            port = int(self.parse_float(row.get("service_port") or row.get("port"), 443.0))
+            port = int(self.parse_float(row.get("destination_port") or row.get("service_port") or row.get("port"), 443.0))
             bytes_tf = int(self.parse_float(row.get("bytes_transferred") or row.get("bytes"), 0.0))
-            duration = int(self.parse_float(row.get("duration_sec") or row.get("duration"), 0.0))
+            duration = int(self.parse_float(row.get("duration_seconds") or row.get("duration_sec") or row.get("duration"), 0.0))
+            imei_val = str(row.get("imei") or "").strip() or None
+            cell_id_val = str(row.get("cell_id") or row.get("cell_tower_id") or "").strip() or None
 
             entities = CanonicalEntities(
                 name=row.get("subscriber_name") or row.get("user"),
@@ -53,12 +55,13 @@ class IPDRParser(BaseParser):
             )
 
             telemetry = CanonicalTelemetry(
-                assigned_ip=str(row.get("assigned_ip")).strip() if row.get("assigned_ip") else None,
+                assigned_ip=str(row.get("assigned_ip") or row.get("private_ip") or "").strip() or None,
                 destination_ip=str(row.get("destination_ip")).strip() if row.get("destination_ip") else None,
                 service_port=port,
                 bytes_transferred=bytes_tf,
                 duration_seconds=duration,
-                cell_tower_id=str(row.get("cell_tower_id")).strip() if row.get("cell_tower_id") else None,
+                imei=imei_val,
+                cell_tower_id=cell_id_val,
                 lat=lat if lat != 0.0 else None,
                 lng=lng if lng != 0.0 else None,
                 address=row.get("tower_address") or row.get("address")
@@ -67,7 +70,13 @@ class IPDRParser(BaseParser):
             financial = CanonicalFinancial()
 
             attributes = {
-                "session_id": row.get("session_id", f"IPDR-{idx}")
+                "ipdr_id": row.get("ipdr_id") or row.get("session_id", f"IPDR-{idx}"),
+                "session_id": row.get("ipdr_id") or row.get("session_id", f"IPDR-{idx}"),
+                "record_id": row.get("ipdr_id") or row.get("session_id", f"IPDR-{idx}"),
+                "subscriber_id": row.get("subscriber_id"),
+                "device_id": str(row.get("device_id") or "").strip() or None,
+                "cell_id": cell_id_val,
+                "destination_ip": str(row.get("destination_ip")).strip() if row.get("destination_ip") else None
             }
 
             provenance = EventProvenance(
@@ -80,6 +89,7 @@ class IPDRParser(BaseParser):
             )
 
             events.append(CanonicalEvent(
+                event_id=str(attributes["record_id"]).strip(),
                 case_id=case_id,
                 evidence_id=evidence_id,
                 event_type="IP_SESSION",

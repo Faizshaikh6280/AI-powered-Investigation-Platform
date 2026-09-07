@@ -18,7 +18,8 @@ class FeatureFactory:
 
     def build_entity_feature_store(
         self,
-        case_id: Optional[str] = None
+        case_id: Optional[str] = None,
+        events: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Dict[str, Any]]:
         """
         Groups all canonical events by resolved entity cluster or primary anchor,
@@ -36,22 +37,79 @@ class FeatureFactory:
                 "event_ids": [...]
             }
         """
-        events = canonical_reader.read_all_events(case_id=case_id)
-        if not events:
-            return {}
+        if events is None:
+            events = canonical_reader.iter_all_events(case_id=case_id, limit=5000)
 
-        # Group events by entity
-        # Hierarchy: z_cluster_id -> phone -> account_number -> handle -> raw event
+        # Preload Golden Profiles for instant identity resolution across all anchors
+        profile_map: Dict[str, Dict[str, Any]] = {}
+        try:
+            from app.core.database import get_db_context
+            from app.models.postgres_models import GoldenProfileModel
+            with get_db_context() as db:
+                query = db.query(GoldenProfileModel)
+                if case_id:
+                    query = query.filter(GoldenProfileModel.case_id == case_id)
+                for p in query.all():
+                    p_data = {
+                        "z_cluster_id": p.z_cluster_id,
+                        "primary_name": p.primary_name,
+                        "known_aliases": list(p.known_aliases or []),
+                        "known_phones": [str(ph) for ph in (p.known_phones or [])],
+                        "known_accounts": [str(acc) for acc in (p.known_accounts or [])],
+                        "social_handles": list(p.social_handles or []),
+                        "risk_score": float(p.risk_score or 0.5)
+                    }
+                    profile_map[p.z_cluster_id] = p_data
+                    if p.primary_name:
+                        profile_map[p.primary_name] = p_data
+                        profile_map[p.primary_name.lower()] = p_data
+                    for alias in p_data["known_aliases"]:
+                        profile_map[alias] = p_data
+                        profile_map[alias.lower()] = p_data
+                    for ph in p_data["known_phones"]:
+                        profile_map[ph] = p_data
+                    for acc in p_data["known_accounts"]:
+                        profile_map[acc] = p_data
+                    for sh in p_data["social_handles"]:
+                        if isinstance(sh, dict) and sh.get("handle"):
+                            profile_map[sh["handle"]] = p_data
+        except Exception as e:
+            logger.warning(f"Failed to preload golden profiles: {e}")
+
+        # Group events by resolved entity cluster
         entity_events: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
 
         for ev in events:
             cluster_id = ev.get("z_cluster_id")
-            phone = ev.get("normalized_identity", {}).get("phone")
-            account = ev.get("financial", {}).get("account_number")
-            handle = ev.get("normalized_identity", {}).get("social_handle")
+            norm_id = ev.get("normalized_identity") or {}
+            entities = ev.get("entities") or {}
+            attrs = ev.get("attributes") or {}
+            fin = ev.get("financial") or {}
 
-            entity_key = cluster_id or phone or account or handle or ev.get("event_id")
-            entity_events[str(entity_key)].append(ev)
+            phone = norm_id.get("phone") or entities.get("phone") or attrs.get("phone") or attrs.get("mobile")
+            account = fin.get("account_number") or attrs.get("account") or attrs.get("account_number") or attrs.get("from_account")
+            handle = norm_id.get("social_handle") or entities.get("social_handle") or attrs.get("social_handle") or attrs.get("handle")
+            name = norm_id.get("name") or entities.get("name") or attrs.get("name") or attrs.get("full_name")
+
+            resolved_cid = None
+            if cluster_id and cluster_id in profile_map:
+                resolved_cid = cluster_id
+            elif phone and str(phone) in profile_map:
+                resolved_cid = profile_map[str(phone)]["z_cluster_id"]
+            elif account and str(account) in profile_map:
+                resolved_cid = profile_map[str(account)]["z_cluster_id"]
+            elif handle and str(handle) in profile_map:
+                resolved_cid = profile_map[str(handle)]["z_cluster_id"]
+            elif name and str(name) in profile_map:
+                resolved_cid = profile_map[str(name)]["z_cluster_id"]
+            elif name and str(name).lower() in profile_map:
+                resolved_cid = profile_map[str(name).lower()]["z_cluster_id"]
+
+            imei = ev.get("telemetry", {}).get("imei") or attrs.get("imei")
+            entity_key = resolved_cid or cluster_id or phone or account or handle or imei
+            if not entity_key or str(entity_key).strip() in ("", "nan", "none", "None"):
+                continue
+            entity_events[str(entity_key).strip()].append(ev)
 
         entity_store: Dict[str, Dict[str, Any]] = {}
 
@@ -71,18 +129,22 @@ class FeatureFactory:
             evidence_ids = list({e.get("evidence_id") for e in ev_list if e.get("evidence_id")})
             event_ids = [e.get("event_id") for e in ev_list if e.get("event_id")]
 
-            # Resolve entity display name/type
-            name = None
-            for e in ev_list:
-                n = e.get("normalized_identity", {}).get("name")
-                if n and n != "Unknown":
-                    name = n
-                    break
+            # Resolve entity display name and metadata from Golden Profile
+            profile = profile_map.get(entity_id)
+            display_name = profile.get("primary_name") if profile else None
+            if not display_name:
+                for e in ev_list:
+                    n = e.get("normalized_identity", {}).get("name")
+                    if n and n != "Unknown":
+                        display_name = n
+                        break
+            display_name = display_name or entity_id
 
             entity_store[entity_id] = {
                 "entity_id": entity_id,
-                "display_name": name or entity_id,
-                "entity_type": "Person" if (entity_id.startswith("CLUSTER") or name) else "Account" if any(bank_events) else "Phone",
+                "display_name": display_name,
+                "entity_type": "Person" if (profile or entity_id.startswith("CLUSTER") or display_name != entity_id) else "Account" if any(bank_events) else "Phone",
+                "profile": profile,
                 "communication": comm_feat,
                 "financial": fin_feat,
                 "spatial": spatial_feat,

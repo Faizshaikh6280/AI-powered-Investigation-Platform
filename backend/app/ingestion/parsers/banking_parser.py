@@ -84,29 +84,73 @@ class BankingParser(BaseParser):
 
         for idx, row in enumerate(rows, start=1):
             phone = self.clean_phone(row.get("linked_phone") or row.get("phone"))
-            timestamp = self.clean_date(row.get("timestamp") or row.get("txn_date") or row.get("date"))
+            timestamp = self.clean_date(
+                row.get("transaction_time") or row.get("timestamp") or row.get("txn_date") or row.get("date")
+            )
             amount = self.parse_float(row.get("amount_inr") or row.get("amount") or row.get("transaction_amount"))
-            acc_num = str(row.get("account_number") or row.get("account") or "").strip()
+            acc_num = str(row.get("account_number") or row.get("account") or row.get("from_account") or "").strip()
+            
+            sender = str(row.get("sender") or row.get("from_name") or "").strip()
+            receiver = str(row.get("receiver") or row.get("to_name") or "").strip()
+            raw_txn_type = str(row.get("transaction_type") or row.get("txn_type") or "TRANSFER").upper()
+            raw_channel = str(row.get("channel") or "").upper()
+            
             counterparty = str(row.get("counterparty_identifier") or row.get("counterparty") or row.get("to_account") or "").strip()
+            
+            if "ATM" in raw_txn_type or "CASH" in raw_txn_type or raw_channel == "ATM":
+                norm_txn_type = "DEBIT"
+                channel = "ATM"
+                primary_name = sender or receiver or row.get("account_holder_name") or row.get("name")
+                counterparty = counterparty or "ATM"
+            elif raw_txn_type in ("CREDIT", "DEPOSIT", "INFLOW"):
+                norm_txn_type = "CREDIT"
+                channel = raw_channel or "TRANSFER"
+                primary_name = receiver or row.get("account_holder_name") or row.get("name") or sender
+                counterparty = counterparty or sender
+            else:
+                norm_txn_type = "DEBIT"
+                channel = raw_channel or "TRANSFER"
+                primary_name = sender or row.get("account_holder_name") or row.get("name") or receiver
+                counterparty = counterparty or receiver
+
+            device_imei = str(row.get("device_imei") or row.get("imei") or "").strip() or None
+            location_str = str(row.get("location") or row.get("address") or "").strip() or None
+            atm_id = str(row.get("atm_id") or "").strip() or None
 
             entities = CanonicalEntities(
-                name=row.get("account_holder_name") or row.get("name"),
-                phone=phone
+                name=primary_name if primary_name else None,
+                phone=phone,
+                counterparty_name=counterparty if counterparty else None
             )
 
-            telemetry = CanonicalTelemetry()
+            telemetry = CanonicalTelemetry(
+                imei=device_imei,
+                address=location_str
+            )
 
             financial = CanonicalFinancial(
                 account_number=acc_num if acc_num else None,
                 amount_inr=amount,
-                txn_type=str(row.get("txn_type", "TRANSFER")).upper(),
-                channel=row.get("channel", "TRANSFER"),
+                txn_type=norm_txn_type,
+                channel=channel,
                 counterparty=counterparty if counterparty else None,
-                narration=row.get("narration") or row.get("description")
+                narration=row.get("description") or row.get("narration")
             )
 
             attributes = {
-                "txn_id": row.get("txn_id", f"TXN-{idx}")
+                "transaction_id": row.get("transaction_id") or row.get("txn_id", f"TXN-{idx}"),
+                "record_id": row.get("transaction_id") or row.get("txn_id", f"TXN-{idx}"),
+                "txn_id": row.get("transaction_id") or row.get("txn_id", f"TXN-{idx}"),
+                "from_account": acc_num,
+                "to_account": counterparty,
+                "from_name": sender,
+                "to_name": receiver,
+                "sender": sender,
+                "receiver": receiver,
+                "raw_transaction_type": raw_txn_type,
+                "atm_id": atm_id,
+                "device_imei": device_imei,
+                "location": location_str
             }
 
             provenance = EventProvenance(
@@ -119,6 +163,7 @@ class BankingParser(BaseParser):
             )
 
             events.append(CanonicalEvent(
+                event_id=str(attributes["record_id"]).strip(),
                 case_id=case_id,
                 evidence_id=evidence_id,
                 event_type="TRANSACTION",
