@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 def extract_json_from_text(text: str) -> dict:
-    """Robustly extract JSON from the LLM's raw text response."""
+    """Robustly extract JSON from the LLM's raw text response using standard and json_repair fallbacks."""
     if not text:
         return {"error": "Empty response from LLM"}
 
@@ -29,40 +29,49 @@ def extract_json_from_text(text: str) -> dict:
     if match:
         cleaned_text = match.group(1).strip()
     
-    # Find the outermost JSON object
+    # 1. Try direct standard json parsing
+    try:
+        return json.loads(cleaned_text)
+    except Exception:
+        pass
+
+    # 2. Extract outermost JSON braces and attempt standard json parsing
     first_brace = cleaned_text.find('{')
     last_brace = cleaned_text.rfind('}')
-    
+    candidate = ""
     if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
         candidate = cleaned_text[first_brace:last_brace + 1]
         try:
             return json.loads(candidate)
-        except json.JSONDecodeError:
-            # Fix common LLM JSON syntax issues
-            fixed = re.sub(r',\s*}', '}', candidate)
-            fixed = re.sub(r',\s*]', ']', fixed)
-            # Remove trailing ellipsis or truncation artifacts
-            fixed = re.sub(r'\.\.\.\s*([\}\]])', r'\1', fixed)
-            try:
-                return json.loads(fixed)
-            except json.JSONDecodeError:
-                # Attempt to balance braces if truncated
-                open_b = fixed.count('{') - fixed.count('}')
-                open_br = fixed.count('[') - fixed.count(']')
-                balanced = fixed + (']' * max(0, open_br)) + ('}' * max(0, open_b))
-                try:
-                    return json.loads(balanced)
-                except Exception as e:
-                    logger.warning(f"JSON recovery failed: {e}")
+        except Exception:
+            pass
 
-    # Fallback to direct parse
+    # 3. Use json_repair on candidate or cleaned text
     try:
-        return json.loads(cleaned_text)
+        from json_repair import repair_json
+        target_str = candidate if candidate else cleaned_text
+        repaired = repair_json(target_str, return_objects=True)
+        if isinstance(repaired, dict):
+            return repaired
+    except Exception as e:
+        logger.warning(f"json_repair failed: {e}")
+
+    # 4. Fallback regex repairs
+    try:
+        target = candidate if candidate else cleaned_text
+        fixed = re.sub(r',\s*}', '}', target)
+        fixed = re.sub(r',\s*]', ']', fixed)
+        fixed = re.sub(r'\.\.\.\s*([\}\]])', r'\1', fixed)
+        open_b = fixed.count('{') - fixed.count('}')
+        open_br = fixed.count('[') - fixed.count(']')
+        balanced = fixed + (']' * max(0, open_br)) + ('}' * max(0, open_b))
+        return json.loads(balanced)
     except Exception:
         return {
             "error": "Failed to parse valid JSON from agent",
             "raw_output": text[:3000] if text else ""
         }
+
 
 
 def build_fallback_dossier(raw_text: str, community_json: dict) -> dict:
@@ -490,12 +499,12 @@ def save_report_progress(community_id: Any, field: str, data):
 
 def call_specialist(role_prompt: str, community_json: dict) -> dict:
     """Call a specialist agent. Returns the parsed JSON dictionary."""
-    llm = get_llm()
+    llm = get_llm(num_predict=800, num_ctx=4096)
     
     # Truncate data to prevent context overflow on 7B models
     data_str = json.dumps(community_json, indent=2)
-    if len(data_str) > 8000:
-        data_str = data_str[:8000] + "\n... (truncated)"
+    if len(data_str) > 6000:
+        data_str = data_str[:6000] + "\n... (truncated)"
     
     prompt = role_prompt.replace("{graph_data}", data_str)
     
@@ -550,7 +559,7 @@ def run_lead_agent(aggregator_prompt: str, community_json: dict, state: dict = N
     Enforces runtime Neo4j query capability and structured 5 GDS algorithm reporting.
     Supports both individual syndicate and global entire-graph modes.
     """
-    llm = get_llm()
+    llm = get_llm(num_predict=2200, num_ctx=8192)
     meta = community_json.get("community_metadata", {})
     kingpin = meta.get("kingpin", "Unknown")
     broker = meta.get("broker", "Unknown")
@@ -579,7 +588,8 @@ Decide if you need to query Neo4j. Return pure JSON:
 }}"""
 
     try:
-        resp = llm.invoke([SystemMessage(content=query_decision_prompt)])
+        llm_fast = get_llm(num_predict=350, num_ctx=4096)
+        resp = llm_fast.invoke([SystemMessage(content=query_decision_prompt)])
         decision = extract_json_from_text(resp.content)
         if decision.get("action") == "query_neo4j" and decision.get("cypher_query"):
             cypher = decision["cypher_query"]

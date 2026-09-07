@@ -86,6 +86,9 @@ services:
       - REDIS_URI=redis://redis:6379/0
       - ZINGG_URL=http://zingg_worker:8001
       - MONGO_URI=mongodb://mongodb:27017
+      - LLM_PROVIDER=ollama
+      - LLM_MODEL=qwen2.5:7b-instruct
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
     depends_on:
       - postgres
       - minio
@@ -120,6 +123,9 @@ services:
       - REDIS_URI=redis://redis:6379/0
       - ZINGG_URL=http://zingg_worker:8001
       - MONGO_URI=mongodb://mongodb:27017
+      - LLM_PROVIDER=ollama
+      - LLM_MODEL=qwen2.5:7b-instruct
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
     depends_on:
       - postgres
       - minio
