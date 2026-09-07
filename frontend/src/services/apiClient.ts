@@ -5,6 +5,223 @@
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 
+// ==========================================
+// IDENTITY & ACCESS MANAGEMENT (IAM) TYPES
+// ==========================================
+
+export interface UserProfile {
+  id: string;
+  employee_id: string;
+  full_name: string;
+  email: string;
+  official_email: string;
+  phone_number?: string;
+  role: string;
+  role_display?: string;
+  unit?: string;
+  unit_code?: string;
+  organization?: string;
+  status: 'ACTIVE' | 'SUSPENDED' | 'DISABLED';
+  mfa_enabled: boolean;
+  last_login_at?: string;
+}
+
+export interface CaseMembership {
+  case_id: string;
+  case_role: string;
+}
+
+export interface AuthStateResponse {
+  status: string;
+  mfa_required?: boolean;
+  challenge_token?: string;
+  message?: string;
+  user?: UserProfile;
+  permissions?: string[];
+  case_memberships?: CaseMembership[];
+}
+
+export interface UserSession {
+  id: number;
+  session_id: string;
+  ip_address?: string;
+  user_agent?: string;
+  created_at: string;
+  expires_at: string;
+  last_activity_at: string;
+  active: boolean;
+}
+
+export interface AuditLogEntry {
+  id: number;
+  audit_id: string;
+  timestamp: string;
+  user_id?: string;
+  actor: string;
+  role?: string;
+  organization_id?: string;
+  unit_id?: string;
+  case_id?: string;
+  evidence_id?: string;
+  action: string;
+  resource_type?: string;
+  resource_id?: string;
+  result: string;
+  reason?: string;
+  ip_address?: string;
+  user_agent?: string;
+  details?: Record<string, any>;
+  request_id?: string;
+  correlation_id?: string;
+}
+
+export interface NFCCardRecord {
+  id: string;
+  user_id: string;
+  officer_name: string;
+  employee_id: string;
+  officer_role?: string;
+  officer_unit?: string;
+  card_uid: string;
+  status: 'ACTIVE' | 'SUSPENDED' | 'REVOKED' | 'EXPIRED';
+  issued_at: string;
+  activated_at?: string;
+  last_used_at?: string;
+  failed_attempt_count: number;
+  is_locked: boolean;
+  locked_until?: string;
+}
+
+export interface NFCInitiateResponse {
+  status: string;
+  transaction_id: string;
+  expires_in_seconds: number;
+  message?: string;
+}
+
+export interface NFCVerifyPinResponse {
+  status: string;
+  message: string;
+  target_case_id: string | null;
+  user: UserProfile;
+}
+
+// ==========================================
+// FORENSIC NFC CRIME SCENE EVIDENCE TYPES
+// ==========================================
+
+export interface NFCDerivedIdentifier {
+  field: string;
+  value: string;
+  source_record_index: number;
+  extraction_method: string;
+  confidence: number;
+  status: string;
+}
+
+export interface NFCEntityResolutionCandidate {
+  cluster_id: string;
+  primary_name: string;
+  risk_score: number;
+  score: number;
+  reasons: string[];
+  conflicts?: string[];
+  known_phones?: string[];
+}
+
+export interface NFCEntityResolutionResult {
+  match_tier: 'MATCHED' | 'POSSIBLE_MATCH' | 'NO_MATCH';
+  matched_cluster_id: string;
+  matched_name: string;
+  confidence: number;
+  is_provisional: boolean;
+  reasons: string[];
+  conflicts?: string[];
+  candidates?: NFCEntityResolutionCandidate[];
+  source_evidence_id: string;
+}
+
+export interface NFCCaseCorrelations {
+  telecom_cdr: { count: number; summary: string };
+  financial_banking: { count: number; summary: string };
+  network_ipdr: { count: number; summary: string };
+  social_logs: { count: number; summary: string };
+  timeline_events: { count: number; summary: string };
+  geospatial_proximity: { proximity_detected: boolean; min_distance_km?: number; summary: string };
+  anomaly_signals: { count: number; signals: string[] };
+  existing_findings: { count: number; findings: Array<{ id: string; title: string; severity: string }> };
+}
+
+export interface NFCAcquisitionRecord {
+  record_type: string;
+  media_type?: string;
+  encoding?: string;
+  lang?: string;
+  data_text?: string;
+  data_bytes_hex?: string;
+}
+
+export interface NFCAcquisitionPayload {
+  raw_payload: {
+    serial_number?: string;
+    card_uid?: string;
+    records: NFCAcquisitionRecord[];
+  };
+  location_metadata?: {
+    latitude?: number;
+    longitude?: number;
+    location_name?: string;
+    crime_scene_id?: string;
+  };
+  hardware_metadata?: {
+    device_model?: string;
+    scanner_type?: string;
+    scan_protocol?: string;
+  };
+  allow_duplicate?: boolean;
+}
+
+export interface NFCAcquisitionDossier {
+  acquisition_id: string;
+  evidence_id: string;
+  case_id: string;
+  acquired_by: string;
+  acquired_at: string;
+  card_uid?: string;
+  nfc_format: string;
+  record_count: number;
+  raw_sha256: string;
+  raw_payload_uri: string;
+  acquisition_status: string;
+  error_message?: string;
+  hardware_metadata: Record<string, any>;
+  location_metadata: Record<string, any>;
+  derived_identifiers: NFCDerivedIdentifier[];
+  entity_resolution: NFCEntityResolutionResult;
+  case_correlations: NFCCaseCorrelations;
+  finding_id?: string;
+  investigator_assessment: string;
+  provenance_info: Record<string, any>;
+}
+
+export interface NFCScannerStatus {
+  status: string;
+  case_id: string;
+  supported_technologies: string[];
+  max_message_bytes: number;
+  max_record_bytes: number;
+  system_time_utc: string;
+}
+
+export interface NFCFixtureCard {
+  id: string;
+  label: string;
+  description: string;
+  card_uid?: string;
+  records: NFCAcquisitionRecord[];
+  expected_outcome: string;
+}
+
 export interface Case {
   case_id: string;
   case_reference: string;
@@ -424,6 +641,13 @@ export interface AnomalyRunResult {
   detectors_failed: string[];
 }
 
+async function authFetch(url: string, options?: RequestInit): Promise<Response> {
+  return fetch(url, {
+    ...options,
+    credentials: 'include',
+  });
+}
+
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let errorDetail = res.statusText;
@@ -525,6 +749,31 @@ export const apiClient = {
       body: formData,
     });
     return handleResponse<any>(res);
+  },
+
+  // === NFC CRIME SCENE EVIDENCE ===
+  async getNfcScannerStatus(caseId: string): Promise<NFCScannerStatus> {
+    const res = await authFetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/evidence/nfc/status`);
+    return handleResponse<NFCScannerStatus>(res);
+  },
+
+  async getNfcFixtures(caseId: string): Promise<{ fixtures: NFCFixtureCard[] }> {
+    const res = await authFetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/evidence/nfc/fixtures`);
+    return handleResponse<{ fixtures: NFCFixtureCard[] }>(res);
+  },
+
+  async submitNfcAcquisition(caseId: string, payload: NFCAcquisitionPayload): Promise<any> {
+    const res = await authFetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/evidence/nfc/acquisitions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return handleResponse<any>(res);
+  },
+
+  async getNfcAcquisitionDossier(caseId: string, acquisitionId: string): Promise<NFCAcquisitionDossier> {
+    const res = await authFetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/evidence/nfc/acquisitions/${encodeURIComponent(acquisitionId)}`);
+    return handleResponse<NFCAcquisitionDossier>(res);
   },
 
   // === INGESTION & PIPELINE ===
@@ -851,6 +1100,359 @@ export const apiClient = {
   async exportGeoDossier(caseId: string, format: 'geojson' | 'json' = 'geojson'): Promise<any> {
     const res = await fetch(`${API_BASE}/api/geo/export?case_id=${encodeURIComponent(caseId)}&format=${format}`);
     return handleResponse<any>(res);
+  },
+
+  // === CCTV LOCATION & ROUTE INTELLIGENCE ===
+  async getCCTVContext(caseId: string): Promise<CCTVIncidentLocation> {
+    const res = await fetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/cctv/context`);
+    return handleResponse<CCTVIncidentLocation>(res);
+  },
+
+  async analyzeCCTV(caseId: string, payload: {
+    latitude: number;
+    longitude: number;
+    address?: string;
+    sector?: string;
+    landmark?: string;
+    incident_date?: string;
+    incident_time?: string;
+    search_radius_meters?: number;
+  }): Promise<CCTVIntelligenceResponse> {
+    const res = await fetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/cctv/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return handleResponse<CCTVIntelligenceResponse>(res);
+  },
+
+  async getCCTVResults(caseId: string): Promise<CCTVIntelligenceResponse> {
+    const res = await fetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/cctv/results`);
+    return handleResponse<CCTVIntelligenceResponse>(res);
+  },
+
+  async verifyCCTVSource(caseId: string, sourceId: string, payload: {
+    new_status: string;
+    reason?: string;
+    camera_count_confirmed?: number;
+    notes?: string;
+  }): Promise<any> {
+    const res = await fetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/cctv/sources/${encodeURIComponent(sourceId)}/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return handleResponse<any>(res);
+  },
+
+  async addManualCCTVSource(caseId: string, payload: {
+    name: string;
+    category?: string;
+    owner_type?: string;
+    address?: string;
+    latitude: number;
+    longitude: number;
+    phone?: string;
+    notes?: string;
+    cctv_present?: boolean;
+  }): Promise<any> {
+    const res = await fetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/cctv/sources/manual`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return handleResponse<any>(res);
+  },
+
+  async addCCTVSourceToCase(caseId: string, sourceId: string, payload?: {
+    item_type?: string;
+    notes?: string;
+  }): Promise<any> {
+    const res = await fetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/cctv/sources/${encodeURIComponent(sourceId)}/add-to-case`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || { item_type: 'SOURCE' })
+    });
+    return handleResponse<any>(res);
+  },
+
+  async updateCCTVLocation(caseId: string, payload: any): Promise<CCTVIntelligenceResponse> {
+    const res = await authFetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/cctv/location`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return handleResponse<CCTVIntelligenceResponse>(res);
+  },
+
+  // === IDENTITY & ACCESS MANAGEMENT (IAM) ===
+  async login(payload: { identifier: string; password: string }): Promise<AuthStateResponse> {
+    _apiCache.clear();
+    const res = await authFetch(`${API_BASE}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return handleResponse<AuthStateResponse>(res);
+  },
+
+  async verifyMfa(payload: { challenge_token: string; code: string; is_backup_code?: boolean }): Promise<AuthStateResponse> {
+    _apiCache.clear();
+    const res = await authFetch(`${API_BASE}/api/auth/mfa/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return handleResponse<AuthStateResponse>(res);
+  },
+
+  async getMe(): Promise<AuthStateResponse> {
+    const res = await authFetch(`${API_BASE}/api/auth/me`);
+    return handleResponse<AuthStateResponse>(res);
+  },
+
+  async logout(): Promise<any> {
+    _apiCache.clear();
+    const res = await authFetch(`${API_BASE}/api/auth/logout`, {
+      method: 'POST',
+    });
+    return handleResponse<any>(res);
+  },
+
+  async changePassword(payload: { current_password: string; new_password: string }): Promise<any> {
+    const res = await authFetch(`${API_BASE}/api/auth/password/change`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return handleResponse<any>(res);
+  },
+
+  async setupMfa(): Promise<{ secret: string; provisioning_uri: string; backup_codes: string[]; message: string }> {
+    const res = await authFetch(`${API_BASE}/api/auth/mfa/setup`, {
+      method: 'POST',
+    });
+    return handleResponse<any>(res);
+  },
+
+  async confirmMfa(code: string): Promise<any> {
+    const res = await authFetch(`${API_BASE}/api/auth/mfa/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+    return handleResponse<any>(res);
+  },
+
+  async getActiveSessions(): Promise<{ sessions: UserSession[] }> {
+    const res = await authFetch(`${API_BASE}/api/auth/sessions`);
+    return handleResponse<any>(res);
+  },
+
+  // === ADMIN & USER MANAGEMENT ===
+  async getUsers(params?: { unit_id?: string; role?: string; status?: string; search?: string }): Promise<{ users: UserProfile[] }> {
+    const query = new URLSearchParams(params as any || {}).toString();
+    const res = await authFetch(`${API_BASE}/api/admin/users${query ? `?${query}` : ''}`);
+    return handleResponse<any>(res);
+  },
+
+  async getRoles(): Promise<{ roles: Array<{ name: string; display_name: string; description: string; permissions: string[] }> }> {
+    const res = await authFetch(`${API_BASE}/api/admin/roles`);
+    return handleResponse<any>(res);
+  },
+
+  async getUnits(): Promise<{ units: Array<{ id: string; name: string; code: string; description: string }> }> {
+    const res = await authFetch(`${API_BASE}/api/admin/units`);
+    return handleResponse<any>(res);
+  },
+
+  async inviteUser(payload: {
+    employee_id: string;
+    full_name: string;
+    official_email: string;
+    role_name: string;
+    unit_id?: string;
+    phone_number?: string;
+  }): Promise<any> {
+    const res = await authFetch(`${API_BASE}/api/admin/users/invite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return handleResponse<any>(res);
+  },
+
+  async updateUserStatus(userId: string, status: string): Promise<any> {
+    const res = await authFetch(`${API_BASE}/api/admin/users/${encodeURIComponent(userId)}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    return handleResponse<any>(res);
+  },
+
+  async updateUserRole(userId: string, roleName: string): Promise<any> {
+    const res = await authFetch(`${API_BASE}/api/admin/users/${encodeURIComponent(userId)}/role`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role_name: roleName }),
+    });
+    return handleResponse<any>(res);
+  },
+
+  async updateUserUnit(userId: string, unitId: string): Promise<any> {
+    const res = await authFetch(`${API_BASE}/api/admin/users/${encodeURIComponent(userId)}/unit`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ unit_id: unitId }),
+    });
+    return handleResponse<any>(res);
+  },
+
+  async revokeSession(sessionId: string): Promise<any> {
+    const res = await authFetch(`${API_BASE}/api/admin/sessions/${encodeURIComponent(sessionId)}`, {
+      method: 'DELETE',
+    });
+    return handleResponse<any>(res);
+  },
+
+  // === AUDIT TRAIL ===
+  async getAuditLogs(params?: {
+    action?: string;
+    actor?: string;
+    role?: string;
+    case_id?: string;
+    result?: string;
+    start_time?: string;
+    end_time?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ logs: AuditLogEntry[]; total: number; limit: number; offset: number }> {
+    const query = new URLSearchParams(params as any || {}).toString();
+    const res = await authFetch(`${API_BASE}/api/audit/logs${query ? `?${query}` : ''}`);
+    return handleResponse<any>(res);
+  },
+
+  async getAuditLogDetail(auditId: string): Promise<AuditLogEntry> {
+    const res = await authFetch(`${API_BASE}/api/audit/logs/${encodeURIComponent(auditId)}`);
+    return handleResponse<AuditLogEntry>(res);
+  },
+
+  async exportAuditLogs(format: string = 'csv'): Promise<Blob> {
+    const res = await authFetch(`${API_BASE}/api/audit/export?format=${encodeURIComponent(format)}`);
+    if (!res.ok) {
+      throw new Error(`Audit Export Failed (${res.status}): ${res.statusText}`);
+    }
+    return res.blob();
+  },
+
+  // === CASE MEMBERSHIP ===
+  async getCaseMembers(caseId: string): Promise<{ case_id: string; members: any[] }> {
+    const res = await authFetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/members`);
+    return handleResponse<any>(res);
+  },
+
+  async assignCaseMember(caseId: string, payload: { user_id: string; case_role: string }): Promise<any> {
+    const res = await authFetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/members`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return handleResponse<any>(res);
+  },
+
+  async removeCaseMember(caseId: string, userId: string): Promise<any> {
+    const res = await authFetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/members/${encodeURIComponent(userId)}`, {
+      method: 'DELETE',
+    });
+    return handleResponse<any>(res);
+  },
+
+  // === FINDINGS APPROVAL HIERARCHY ===
+  async approveFinding(findingId: string, notes?: string): Promise<any> {
+    const res = await authFetch(`${API_BASE}/api/anomalies/findings/${encodeURIComponent(findingId)}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notes }),
+    });
+    return handleResponse<any>(res);
+  },
+
+  async dismissFinding(findingId: string, reason?: string): Promise<any> {
+    const res = await authFetch(`${API_BASE}/api/anomalies/findings/${encodeURIComponent(findingId)}/dismiss`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    });
+    return handleResponse<any>(res);
+  },
+
+  // === NFC CARD AUTHENTICATION & MANAGEMENT ===
+  async initiateNfcAuth(credential: string): Promise<NFCInitiateResponse> {
+    const res = await authFetch(`${API_BASE}/api/auth/nfc/initiate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential }),
+    });
+    return handleResponse<NFCInitiateResponse>(res);
+  },
+
+  async verifyNfcPin(transactionId: string, pin: string): Promise<NFCVerifyPinResponse> {
+    const res = await authFetch(`${API_BASE}/api/auth/nfc/verify-pin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transaction_id: transactionId, pin }),
+    });
+    return handleResponse<NFCVerifyPinResponse>(res);
+  },
+
+  async getNfcDevCards(): Promise<any[]> {
+    const res = await authFetch(`${API_BASE}/api/auth/nfc/dev-cards`);
+    return handleResponse<any[]>(res);
+  },
+
+  async listNfcCards(): Promise<NFCCardRecord[]> {
+    const res = await authFetch(`${API_BASE}/api/admin/nfc-cards`);
+    return handleResponse<NFCCardRecord[]>(res);
+  },
+
+  async issueNfcCard(userId: string, pin: string): Promise<any> {
+    const res = await authFetch(`${API_BASE}/api/admin/nfc-cards/issue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, pin }),
+    });
+    return handleResponse<any>(res);
+  },
+
+  async activateNfcCard(cardId: string): Promise<any> {
+    const res = await authFetch(`${API_BASE}/api/admin/nfc-cards/${encodeURIComponent(cardId)}/activate`, {
+      method: 'POST',
+    });
+    return handleResponse<any>(res);
+  },
+
+  async suspendNfcCard(cardId: string): Promise<any> {
+    const res = await authFetch(`${API_BASE}/api/admin/nfc-cards/${encodeURIComponent(cardId)}/suspend`, {
+      method: 'POST',
+    });
+    return handleResponse<any>(res);
+  },
+
+  async revokeNfcCard(cardId: string): Promise<any> {
+    const res = await authFetch(`${API_BASE}/api/admin/nfc-cards/${encodeURIComponent(cardId)}/revoke`, {
+      method: 'POST',
+    });
+    return handleResponse<any>(res);
+  },
+
+  async replaceNfcCard(cardId: string, newPin: string): Promise<any> {
+    const res = await authFetch(`${API_BASE}/api/admin/nfc-cards/${encodeURIComponent(cardId)}/replace`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_pin: newPin }),
+    });
+    return handleResponse<any>(res);
   }
 };
 
@@ -1014,5 +1616,118 @@ export interface GeoInvestigationResponse {
   density_grid: ActivityDensityCell[];
   story_cards: SpatialStoryCard[];
   summary_metrics: Record<string, any>;
+}
+
+// ==========================================
+// CCTV LOCATION & ROUTE INTELLIGENCE INTERFACES
+// ==========================================
+
+export interface CCTVIncidentLocation {
+  address?: string;
+  sector?: string;
+  landmark?: string;
+  latitude: number;
+  longitude: number;
+  incident_date?: string;
+  incident_time?: string;
+  incident_type?: string;
+  location_source?: string;
+}
+
+export interface CCTVSource {
+  id: string;
+  name: string;
+  type: 'GOVERNMENT_CCTV' | 'GOVERNMENT_DEPLOYMENT' | 'POTENTIAL_PRIVATE' | 'INVESTIGATOR_VERIFIED';
+  category: string;
+  status: 'VERIFIED' | 'GOVERNMENT_DEPLOYMENT_EVIDENCE' | 'POTENTIAL' | 'INVESTIGATOR_VERIFIED' | 'ABSENT' | 'UNKNOWN';
+  address?: string;
+  latitude: number;
+  longitude: number;
+  distance_meters: number;
+  phone?: string;
+  website?: string;
+  why_relevant: string;
+  source_provenance: string;
+  tender_reference?: string;
+  camera_count?: number;
+  deployment_precision?: string;
+  is_verified: boolean;
+  is_added_to_case: boolean;
+  coverage_area_geometry?: any;
+}
+
+export interface CCTVCoverageGap {
+  gap_id: string;
+  road_name: string;
+  start_coord: [number, number];
+  end_coord: [number, number];
+  distance_meters: number;
+  explanation: string;
+}
+
+export interface CCTVSequenceItem {
+  sequence_order: number;
+  source_id: string;
+  source_name: string;
+  source_type: string;
+  road_name: string;
+  distance_from_start_meters: number;
+  estimated_observation_window: string;
+  why_relevant: string;
+}
+
+export interface RouteHypothesis {
+  route_id: string;
+  route_name: string;
+  route_type: 'APPROACH' | 'DEPARTURE' | 'BOTH';
+  origin_area: string;
+  destination: string;
+  direction: string;
+  distance_km: number;
+  distance_meters: number;
+  estimated_travel_time_min: string;
+  estimated_travel_time_seconds: number;
+  surveillance_sources_count: number;
+  government_count: number;
+  private_count: number;
+  coverage_score: 'High' | 'Medium' | 'Low';
+  coverage_score_num: number;
+  coverage_gaps_count: number;
+  coverage_gaps: CCTVCoverageGap[];
+  why_relevant: string;
+  relevance_score: number;
+  is_recommended: boolean;
+  route_geometry: {
+    type: 'LineString';
+    coordinates: [number, number][];
+  };
+  cctv_sequence: CCTVSequenceItem[];
+}
+
+export interface CCTVIntelligenceSummary {
+  total_sources: number;
+  government_sources: number;
+  private_sources: number;
+  verified_sources: number;
+  possible_routes: number;
+  approach_routes: number;
+  departure_routes: number;
+  coverage_gaps: number;
+  recommended_route_id?: string;
+  recommended_starting_point?: string;
+}
+
+export interface CCTVIntelligenceResponse {
+  case_id: string;
+  incident_location: CCTVIncidentLocation;
+  summary: CCTVIntelligenceSummary;
+  sources: CCTVSource[];
+  routes: RouteHypothesis[];
+  deployment_polygons: Array<{
+    id: string;
+    name: string;
+    sector?: string;
+    coordinates: [number, number][];
+  }>;
 }
 

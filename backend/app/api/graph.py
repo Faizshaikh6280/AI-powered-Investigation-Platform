@@ -1,6 +1,12 @@
 from typing import Optional
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 from app.core.neo4j_client import neo4j_client
+from app.core.database import get_db
+from app.models.iam_models import UserModel, CaseMemberModel
+from app.authorization.dependencies import require_permission
+from app.authorization.permissions import Permissions
+from app.authorization.roles import Roles
 
 router = APIRouter()
 
@@ -98,6 +104,83 @@ def build_canonical_graph(target_case_id: str):
                         "properties": {}
                     })
 
+        # NFC Evidence Acquisitions
+        try:
+            from app.models.nfc_evidence_models import NFCEvidenceAcquisitionModel
+            nfc_items = db.query(NFCEvidenceAcquisitionModel).filter_by(case_id=target_case_id).all()
+            for item in nfc_items:
+                ev_node_id = f"evidence_{item.evidence_id}"
+                nodes[ev_node_id] = {
+                    "id": ev_node_id,
+                    "label": f"NFC Evidence ({item.acquisition_id})",
+                    "type": "Evidence",
+                    "riskScore": 0.4,
+                    "properties": {
+                        "evidence_id": item.evidence_id,
+                        "acquisition_id": item.acquisition_id,
+                        "source_type": "NFC",
+                        "sha256": item.raw_sha256,
+                        "records": item.record_count,
+                        "case_id": target_case_id
+                    }
+                }
+                # Extracted Phone/Email edges
+                for ident in (item.derived_identifiers or []):
+                    field = ident.get("field")
+                    val = ident.get("value")
+                    if not val:
+                        continue
+                    if field == "phone":
+                        ph_node_id = f"phone_{val}"
+                        if ph_node_id not in nodes:
+                            nodes[ph_node_id] = {
+                                "id": ph_node_id,
+                                "label": str(val),
+                                "type": "Phone",
+                                "properties": {"number": str(val), "case_id": target_case_id}
+                            }
+                        edges.append({
+                            "id": f"e_{ev_node_id}_{ph_node_id}",
+                            "source": ev_node_id,
+                            "target": ph_node_id,
+                            "relationship": "NFC_EVIDENCE_CONTAINS_PHONE",
+                            "properties": {}
+                        })
+                    elif field == "email":
+                        em_node_id = f"email_{val}"
+                        if em_node_id not in nodes:
+                            nodes[em_node_id] = {
+                                "id": em_node_id,
+                                "label": str(val),
+                                "type": "Email",
+                                "properties": {"address": str(val), "case_id": target_case_id}
+                            }
+                        edges.append({
+                            "id": f"e_{ev_node_id}_{em_node_id}",
+                            "source": ev_node_id,
+                            "target": em_node_id,
+                            "relationship": "NFC_EVIDENCE_CONTAINS_EMAIL",
+                            "properties": {}
+                        })
+
+                # Entity linkage
+                er_res = item.entity_resolution_result or {}
+                matched_cid = er_res.get("matched_cluster_id")
+                tier = er_res.get("match_tier")
+                if matched_cid:
+                    target_p_id = f"person_{matched_cid}"
+                    if target_p_id in nodes:
+                        rel_name = "NFC_EVIDENCE_MATCHED_ENTITY" if tier == "MATCHED" else "NFC_EVIDENCE_SUGGESTS_ENTITY"
+                        edges.append({
+                            "id": f"e_{ev_node_id}_{target_p_id}",
+                            "source": ev_node_id,
+                            "target": target_p_id,
+                            "relationship": rel_name,
+                            "properties": {"confidence": er_res.get("confidence", 0.0)}
+                        })
+        except Exception as nfc_err:
+            logger.warning(f"Error loading NFC graph nodes: {nfc_err}")
+
     try:
         events = canonical_reader.read_all_events(case_id=target_case_id, limit=3000)
         seen_edges = set()
@@ -183,16 +266,27 @@ def build_canonical_graph(target_case_id: str):
     return {"nodes": list(nodes.values()), "edges": edges}
 
 @router.get("/topology")
-def get_graph_topology(case_id: Optional[str] = None):
+def get_graph_topology(
+    case_id: Optional[str] = None,
+    current_user: UserModel = Depends(require_permission(Permissions.GRAPH_VIEW)),
+    db: Session = Depends(get_db)
+):
     target_case_id = case_id
     if not target_case_id:
-        from app.core.database import get_db_context
         from app.models.postgres_models import CaseModel
-        with get_db_context() as db:
-            c = db.query(CaseModel).order_by(CaseModel.created_at.desc()).first()
-            if not c:
-                return {"nodes": [], "edges": []}
-            target_case_id = c.case_id
+        c = db.query(CaseModel).order_by(CaseModel.created_at.desc()).first()
+        if not c:
+            return {"nodes": [], "edges": []}
+        target_case_id = c.case_id
+
+    # Check case membership if scoped investigator
+    role_name = current_user.role.name if current_user.role else ""
+    if role_name not in (Roles.SYSTEM_ADMIN, Roles.SUPERINTENDENT, Roles.AUDITOR):
+        is_member = db.query(CaseMemberModel).filter_by(
+            case_id=target_case_id, user_id=current_user.id, active=True
+        ).first()
+        if not is_member and role_name != Roles.IPS_OFFICER:
+            raise HTTPException(status_code=403, detail=f"Access denied: Not assigned to case {target_case_id}")
 
     # If Neo4j is connected, synchronize and query native Cypher graph
     if neo4j_client.ensure_connected():
@@ -263,7 +357,11 @@ def get_graph_topology(case_id: Optional[str] = None):
     return build_canonical_graph(target_case_id)
 
 @router.post("/sync")
-def sync_graph(case_id: Optional[str] = None):
+def sync_graph(
+    case_id: Optional[str] = None,
+    current_user: UserModel = Depends(require_permission(Permissions.GRAPH_VIEW))
+):
     from app.services.graph_sync import sync_mongo_to_neo4j
     return sync_mongo_to_neo4j(case_id=case_id)
+
 

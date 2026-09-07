@@ -2,11 +2,12 @@
 
 import React, { useState } from 'react';
 import { 
-  FolderOpen, Plus, Calendar, User, CheckCircle, ShieldCheck, 
+  FolderOpen, Plus, Calendar, User, Users, CheckCircle, ShieldCheck, 
   ArrowRight, FileSpreadsheet, AlertTriangle, Database, Trash2, Loader2
 } from 'lucide-react';
 import { useCase } from '../context/CaseContext';
 import CreateCaseModal from './CreateCaseModal';
+import CaseMembersModal from './CaseMembersModal';
 import { cn } from '../utils/cn';
 
 interface CaseManagementViewProps {
@@ -18,6 +19,7 @@ export default function CaseManagementView({ onSelectCaseTab }: CaseManagementVi
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isDeletingAll, setIsDeletingAll] = useState(false);
+  const [membersModalCase, setMembersModalCase] = useState<{ id: string; title: string } | null>(null);
 
   const handleDeleteCase = async (e: React.MouseEvent, caseId: string, caseTitle: string) => {
     e.stopPropagation();
@@ -127,6 +129,16 @@ export default function CaseManagementView({ onSelectCaseTab }: CaseManagementVi
                         {c.status}
                       </span>
                       <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMembersModalCase({ id: c.case_id, title: c.title });
+                        }}
+                        className="p-1 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded transition-colors"
+                        title="Manage Assigned Personnel"
+                      >
+                        <Users className="w-3.5 h-3.5" />
+                      </button>
+                      <button
                         onClick={(e) => handleDeleteCase(e, c.case_id, c.title)}
                         disabled={deletingId === c.case_id}
                         className="p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded transition-colors"
@@ -193,6 +205,14 @@ export default function CaseManagementView({ onSelectCaseTab }: CaseManagementVi
       )}
 
       <CreateCaseModal isOpen={isCreateOpen} onClose={() => setIsCreateOpen(false)} />
+      {membersModalCase && (
+        <CaseMembersModal
+          isOpen={!!membersModalCase}
+          onClose={() => setMembersModalCase(null)}
+          caseId={membersModalCase.id}
+          caseTitle={membersModalCase.title}
+        />
+      )}
     </div>
   );
 }

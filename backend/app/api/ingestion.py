@@ -3,11 +3,15 @@ import glob
 import logging
 import traceback
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Request, HTTPException
 from app.services.ingestion_service import process_file
 from app.core.database import get_db_context
 from app.models.postgres_models import CaseModel
+from app.models.iam_models import UserModel
 from app.processing.canonical_reader import canonical_reader
+from app.authorization.dependencies import require_permission, require_case_access, get_client_ip
+from app.authorization.permissions import Permissions
+from app.audit.audit_service import record_audit_event, AuditAction
 
 logger = logging.getLogger("investigation.api.ingestion")
 router = APIRouter()
@@ -15,7 +19,11 @@ router = APIRouter()
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "..", "data_files")
 
 @router.post("/trigger_all")
-async def ingest_all_files(case_id: Optional[str] = None):
+async def ingest_all_files(
+    case_id: Optional[str] = None,
+    request: Request = None,
+    current_user: UserModel = Depends(require_permission(Permissions.EVIDENCE_UPLOAD))
+):
     """
     Seeds sample evidence files if explicitly requested, scoped to the specified or active case.
     Does NOT wipe the warehouse.
@@ -69,7 +77,11 @@ async def ingest_all_files(case_id: Optional[str] = None):
     return {"message": "Ingestion complete via new distributed pipeline", "results": results}
 
 @router.get("/events")
-async def get_events(case_id: Optional[str] = None, limit: int = 200):
+async def get_events(
+    case_id: Optional[str] = None,
+    limit: int = 200,
+    current_user: UserModel = Depends(require_permission(Permissions.EVIDENCE_VIEW))
+):
     """
     Retrieves canonical events from the MinIO Parquet warehouse scoped to case_id.
     """

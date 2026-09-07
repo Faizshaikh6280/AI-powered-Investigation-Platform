@@ -61,6 +61,55 @@ class TimelineInvestigationService:
         # 1. Normalize
         normalized_events = timeline_normalizer.normalize_warehouse_events(raw_events, case_id=case_id)
 
+        # 1b. Add NFC Evidence Acquisition Timeline Events from PostgreSQL
+        try:
+            from app.models.nfc_evidence_models import NFCEvidenceAcquisitionModel
+            from app.timeline.schemas import TimelineCanonicalEvent, EpistemicStatus, RiskLevel
+            with get_db_context() as db:
+                nfc_acqs = db.query(NFCEvidenceAcquisitionModel).filter_by(case_id=case_id).all()
+                for acq in nfc_acqs:
+                    dt = acq.acquired_at or acq.created_at
+                    ts_iso = dt.isoformat() if dt else "2026-01-01T00:00:00Z"
+                    ts_ms = int(dt.timestamp() * 1000) if dt else 0
+                    
+                    er_res = acq.entity_resolution_result or {}
+                    matched_name = er_res.get("matched_name") or "Subject"
+                    matched_cid = er_res.get("matched_cluster_id")
+                    
+                    loc = acq.location_metadata or {}
+                    loc_name = loc.get("location_name") or "Crime Scene"
+                    
+                    actors = [{"role": "OFFICER", "identifier": acq.acquired_by}]
+                    if matched_cid:
+                        actors.append({"role": "CANDIDATE_ENTITY", "identifier": matched_name, "cluster_id": matched_cid})
+
+                    nfc_event = TimelineCanonicalEvent(
+                        event_id=f"EVT-{acq.acquisition_id}",
+                        case_id=case_id,
+                        event_type="NFC_ACQUISITION",
+                        domain="LOCATION",
+                        start_time=ts_iso,
+                        raw_timestamp=ts_iso,
+                        normalized_timestamp=ts_iso,
+                        timestamp_ms=ts_ms,
+                        source_type="NFC",
+                        evidence_id=acq.evidence_id,
+                        evidence_filename=f"{acq.acquisition_id}_raw.json",
+                        evidence_sha256=acq.raw_sha256,
+                        actor_entities=[acq.acquired_by] + ([matched_cid] if matched_cid else []),
+                        z_cluster_id=matched_cid,
+                        entity_name=matched_name if matched_cid else None,
+                        narration=f"Physical NFC smartcard ({acq.acquisition_id}) acquired by {acq.acquired_by} at {loc_name}. Extracted {len(acq.derived_identifiers or [])} identifiers.",
+                        risk_level=RiskLevel.MEDIUM.value if matched_cid else RiskLevel.LOW.value,
+                        epistemic_status=EpistemicStatus.OBSERVED.value,
+                        confidence_score=1.0,
+                        tags=["NFC", "PHYSICAL_EVIDENCE", "CRIME_SCENE"]
+                    )
+                    normalized_events.append(nfc_event)
+            normalized_events.sort(key=lambda x: x.timestamp_ms)
+        except Exception as nfc_tl_err:
+            logger.warning(f"[TimelineService] Error adding NFC timeline events: {nfc_tl_err}")
+
         # 2. Correlate
         correlations = temporal_correlation_engine.correlate_events(normalized_events, case_id=case_id)
 

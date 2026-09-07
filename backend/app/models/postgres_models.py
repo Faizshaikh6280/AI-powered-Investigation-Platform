@@ -4,6 +4,13 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from app.core.database import Base
+from app.models.iam_models import (
+    OrganizationModel, UnitModel, RoleModel, PermissionModel,
+    RolePermissionModel, UserModel, CaseMemberModel, SessionModel,
+    MFACredentialModel, InvitationModel, PasswordResetTokenModel, ReportModel
+)
+from app.models.nfc_models import NFCOfficerCardModel
+from app.models.nfc_evidence_models import NFCEvidenceAcquisitionModel
 
 def utcnow():
     return datetime.datetime.now(datetime.timezone.utc)
@@ -20,6 +27,8 @@ class CaseModel(Base):
     created_by = Column(String(128), default="INVESTIGATOR_LEAD", nullable=False)
     status = Column(String(32), default="ACTIVE", index=True, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+    unit_id = Column(String(64), nullable=True, index=True)
+    sensitivity = Column(String(32), default="INTERNAL", nullable=False)
 
     # Relationships
     evidence_items = relationship("EvidenceModel", back_populates="case", cascade="all, delete-orphan")
@@ -35,6 +44,7 @@ class EvidenceModel(Base):
     mime_type = Column(String(128), nullable=True)
     file_size = Column(BigInteger, nullable=False)
     sha256 = Column(String(64), nullable=False, index=True)
+    sensitivity = Column(String(32), default="SENSITIVE", nullable=False)
     
     # Encryption parameters (algorithm, nonce, key reference) - never plaintext keys
     encryption_metadata = Column(JSON, nullable=True)
@@ -125,16 +135,29 @@ class GoldenProfileModel(Base):
 
 
 class AuditLogModel(Base):
-    """Tamper-evident audit log for chain of custody and investigative actions."""
+    """Tamper-evident audit log for chain of custody, security, and investigative actions."""
     __tablename__ = "audit_logs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    audit_id = Column(String(64), unique=True, nullable=True, index=True)
+    timestamp = Column(DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    user_id = Column(String(64), nullable=True, index=True)
+    actor = Column(String(128), default="SYSTEM", nullable=False, index=True)
+    role = Column(String(64), nullable=True, index=True)
+    organization_id = Column(String(64), nullable=True, index=True)
+    unit_id = Column(String(64), nullable=True, index=True)
     case_id = Column(String(64), nullable=True, index=True)
     evidence_id = Column(String(64), nullable=True, index=True)
-    actor = Column(String(128), default="SYSTEM", nullable=False)
     action = Column(String(128), nullable=False, index=True)
+    resource_type = Column(String(64), nullable=True, index=True)
+    resource_id = Column(String(128), nullable=True, index=True)
+    result = Column(String(32), default="SUCCESS", nullable=False, index=True)  # SUCCESS, DENIED, FAILED
+    reason = Column(Text, nullable=True)
+    ip_address = Column(String(64), nullable=True)
+    user_agent = Column(String(512), nullable=True)
     details = Column(JSON, nullable=True)
-    timestamp = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    request_id = Column(String(64), nullable=True, index=True)
+    correlation_id = Column(String(64), nullable=True, index=True)
 
 
 class DetectionSignalModel(Base):

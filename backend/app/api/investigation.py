@@ -20,6 +20,9 @@ from typing import Optional
 
 from app.core.database import get_db
 from app.core.neo4j_client import neo4j_client
+from app.models.iam_models import UserModel
+from app.authorization.dependencies import require_permission
+from app.authorization.permissions import Permissions
 try:
     from app.services.gds_engine import get_gds_client, project_and_compute_association_strength, run_gds_analytics, extract_community_subgraph
     from app.services.agents_workflow import app_workflow, InvestigationState
@@ -30,7 +33,7 @@ except Exception as _agent_import_err:
 router = APIRouter(prefix="/api/v1/investigation", tags=["Investigation"])
 
 @router.post("/project-graph")
-def project_graph():
+def project_graph(current_user: UserModel = Depends(require_permission(Permissions.GRAPH_VIEW))):
     """Runs GDS / NetworkX projection and computes Association Strength across all modalities."""
     try:
         res = project_and_compute_association_strength(graph_name="criminal_network")
@@ -39,7 +42,7 @@ def project_graph():
         return {"status": "success", "message": f"Graph projection completed (mode: {str(e)})"}
 
 @router.post("/run-algorithms")
-def run_algorithms():
+def run_algorithms(current_user: UserModel = Depends(require_permission(Permissions.GRAPH_VIEW))):
     """Executes Louvain, PageRank, and Betweenness; returns list of detected communities with summary stats."""
     try:
         res = run_gds_analytics(graph_name="criminal_network")
@@ -48,7 +51,10 @@ def run_algorithms():
         return {"status": "success", "communities": []}
 
 @router.get("/community/{community_id}/extract")
-def extract_community(community_id: int):
+def extract_community(
+    community_id: int,
+    current_user: UserModel = Depends(require_permission(Permissions.GRAPH_VIEW))
+):
     """Extracts the structured JSON data contract for a given community."""
     try:
         with neo4j_client.driver.session() as session:
@@ -60,8 +66,13 @@ def extract_community(community_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
 @router.get("/community/{community_id}/synthesize")
-async def synthesize_community(community_id: int, request: Request):
+async def synthesize_community(
+    community_id: int,
+    request: Request,
+    current_user: UserModel = Depends(require_permission(Permissions.GRAPH_VIEW))
+):
     """Triggers the LangGraph multi-agent pipeline with Server-Sent Events (SSE) streaming progress updates to the UI."""
     try:
         with neo4j_client.driver.session() as session:
@@ -103,7 +114,10 @@ async def synthesize_community(community_id: int, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/simulate-disruption")
-def simulate_disruption(removed_node_ids: list[str]):
+def simulate_disruption(
+    removed_node_ids: list[str],
+    current_user: UserModel = Depends(require_permission(Permissions.GRAPH_VIEW))
+):
     """Takes removed_node_ids and returns the resulting number of disconnected components and reduction in network diameter."""
     query = """
     MATCH (n:Entity) WHERE NOT n.id IN $removed_ids
@@ -118,3 +132,4 @@ def simulate_disruption(removed_node_ids: list[str]):
         "reduction_percentage": 45.0,
         "message": "Graph fragmented successfully after node removal"
     }
+

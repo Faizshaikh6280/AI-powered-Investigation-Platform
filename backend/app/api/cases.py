@@ -3,7 +3,7 @@ import uuid
 import tempfile
 import datetime
 from typing import List, Optional
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -14,8 +14,15 @@ from app.models.postgres_models import (
     CaseModel, EvidenceModel, QuarantineRecordModel, DataQualityReportModel,
     GoldenProfileModel, DetectionSignalModel, AnomalyFindingModel, AnomalyRunModel, AuditLogModel
 )
+from app.models.iam_models import UserModel, CaseMemberModel
 from app.services.ingestion_service import process_file
 from app.core.storage import storage_service
+from app.authorization.dependencies import (
+    require_permission, require_case_access, get_client_ip, get_current_user
+)
+from app.authorization.permissions import Permissions
+from app.authorization.roles import Roles
+from app.audit.audit_service import record_audit_event, AuditAction
 
 logger = logging.getLogger("investigation.api.cases")
 router = APIRouter(prefix="/cases", tags=["Cases & Evidence Intake"])
@@ -36,8 +43,13 @@ class CaseResponse(BaseModel):
     created_by: str
 
 @router.post("", response_model=CaseResponse)
-def create_case(payload: CaseCreateRequest, db: Session = Depends(get_db)):
-    """Create a new formal investigation case with investigator context."""
+def create_case(
+    payload: CaseCreateRequest,
+    request: Request,
+    current_user: UserModel = Depends(require_permission(Permissions.CASE_CREATE)),
+    db: Session = Depends(get_db)
+):
+    """Create a new formal investigation case with investigator context and automatic case ownership."""
     case_id = f"CASE-{uuid.uuid4().hex[:8].upper()}"
 
     if payload.case_reference and payload.case_reference.strip():
@@ -63,11 +75,35 @@ def create_case(payload: CaseCreateRequest, db: Session = Depends(get_db)):
         case_reference=case_ref,
         title=payload.title,
         description=payload.description,
-        created_by=payload.created_by or "INVESTIGATOR_LEAD"
+        created_by=current_user.employee_id,
+        unit_id=current_user.unit_id
     )
     db.add(new_case)
+
+    # Automatically assign the creator as case OWNER
+    creator_membership = CaseMemberModel(
+        case_id=case_id,
+        user_id=current_user.id,
+        case_role="OWNER",
+        assigned_by=current_user.employee_id,
+        assigned_at=datetime.datetime.now(datetime.timezone.utc),
+        active=True
+    )
+    db.add(creator_membership)
     db.commit()
     db.refresh(new_case)
+
+    record_audit_event(
+        action=AuditAction.CASE_CREATED,
+        result="SUCCESS",
+        user_id=current_user.id,
+        actor=current_user.official_email,
+        role=current_user.role.name if current_user.role else None,
+        case_id=case_id,
+        details={"case_reference": case_ref, "title": payload.title},
+        ip_address=get_client_ip(request),
+        db=db
+    )
 
     return CaseResponse(
         case_id=new_case.case_id,
@@ -135,15 +171,41 @@ def _ensure_benchmark_cases(db: Session):
                 db.rollback()
 
 @router.post("/seed_benchmarks")
-def seed_benchmark_cases(db: Session = Depends(get_db)):
+def seed_benchmark_cases(
+    current_user: UserModel = Depends(require_permission(Permissions.CASE_CREATE)),
+    db: Session = Depends(get_db)
+):
     """Explicitly seeds the 4 standard benchmark cases."""
     _ensure_benchmark_cases(db)
     return {"status": "success", "message": "Benchmark cases registered successfully"}
 
 @router.get("", response_model=List[CaseResponse])
-def list_cases(db: Session = Depends(get_db)):
-    """List all registered investigation cases."""
-    cases = db.query(CaseModel).order_by(CaseModel.created_at.desc()).all()
+def list_cases(
+    current_user: UserModel = Depends(require_permission(Permissions.CASE_READ)),
+    db: Session = Depends(get_db)
+):
+    """
+    List all registered investigation cases authorized for current officer.
+    Supervisory roles view unit/global scope; investigators view assigned cases.
+    """
+    role_name = current_user.role.name if current_user.role else ""
+    if role_name in (Roles.SYSTEM_ADMIN, Roles.SUPERINTENDENT, Roles.AUDITOR):
+        cases = db.query(CaseModel).order_by(CaseModel.created_at.desc()).all()
+    elif role_name == Roles.IPS_OFFICER:
+        assigned_cids = {
+            m.case_id for m in db.query(CaseMemberModel).filter_by(user_id=current_user.id, active=True).all()
+        }
+        cases = db.query(CaseModel).filter(
+            (CaseModel.case_id.in_(assigned_cids)) |
+            (CaseModel.unit_id == current_user.unit_id) |
+            (CaseModel.unit_id == None)
+        ).order_by(CaseModel.created_at.desc()).all()
+    else:
+        assigned_cids = {
+            m.case_id for m in db.query(CaseMemberModel).filter_by(user_id=current_user.id, active=True).all()
+        }
+        cases = db.query(CaseModel).filter(CaseModel.case_id.in_(assigned_cids)).order_by(CaseModel.created_at.desc()).all()
+
     return [
         CaseResponse(
             case_id=c.case_id,
@@ -157,11 +219,27 @@ def list_cases(db: Session = Depends(get_db)):
     ]
 
 @router.get("/{case_id}")
-def get_case_details(case_id: str, db: Session = Depends(get_db)):
+def get_case_details(
+    case_id: str,
+    request: Request,
+    current_user: UserModel = Depends(require_case_access(Permissions.CASE_READ)),
+    db: Session = Depends(get_db)
+):
     """Retrieve case metadata, context notes, and attached evidence items."""
     case = db.query(CaseModel).filter_by(case_id=case_id).first()
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
+
+    record_audit_event(
+        action=AuditAction.CASE_VIEWED,
+        result="SUCCESS",
+        user_id=current_user.id,
+        actor=current_user.official_email,
+        role=current_user.role.name if current_user.role else None,
+        case_id=case_id,
+        ip_address=get_client_ip(request),
+        db=db
+    )
 
     evidence_items = db.query(EvidenceModel).filter_by(case_id=case_id).all()
     return {
@@ -188,9 +266,11 @@ def get_case_details(case_id: str, db: Session = Depends(get_db)):
 @router.post("/{case_id}/evidence")
 async def upload_evidence(
     case_id: str,
+    request: Request,
     file: UploadFile = File(...),
     notes: Optional[str] = Form(None),
     source_type: Optional[str] = Form(None),
+    current_user: UserModel = Depends(require_case_access(Permissions.EVIDENCE_UPLOAD)),
     db: Session = Depends(get_db)
 ):
     """
@@ -224,6 +304,19 @@ async def upload_evidence(
                 evidence_id=evidence_id
             )
 
+            record_audit_event(
+                action=AuditAction.EVIDENCE_UPLOADED,
+                result="SUCCESS",
+                user_id=current_user.id,
+                actor=current_user.official_email,
+                role=current_user.role.name if current_user.role else None,
+                case_id=case_id,
+                evidence_id=evidence_id,
+                details={"filename": file.filename, "detected_source": result.get("detected_source")},
+                ip_address=get_client_ip(request),
+                db=db
+            )
+
             # Automatically trigger Entity Resolution, Graph Sync, and Anomaly Detection in background
             try:
                 from app.services.pipeline_orchestrator import run_case_pipeline_async
@@ -245,11 +338,24 @@ async def upload_evidence(
             os.rmdir(temp_dir)
 
 @router.get("/evidence/{evidence_id}/status")
-def get_evidence_status(evidence_id: str, db: Session = Depends(get_db)):
+def get_evidence_status(
+    evidence_id: str,
+    request: Request,
+    current_user: UserModel = Depends(require_permission(Permissions.EVIDENCE_VIEW)),
+    db: Session = Depends(get_db)
+):
     """Check granular processing status, source detection confidence, and quality metrics."""
     ev = db.query(EvidenceModel).filter_by(evidence_id=evidence_id).first()
     if not ev:
         raise HTTPException(status_code=404, detail="Evidence not found")
+
+    role_name = current_user.role.name if current_user.role else ""
+    if role_name not in (Roles.SYSTEM_ADMIN, Roles.SUPERINTENDENT, Roles.AUDITOR):
+        is_member = db.query(CaseMemberModel).filter_by(
+            case_id=ev.case_id, user_id=current_user.id, active=True
+        ).first()
+        if not is_member and role_name != Roles.IPS_OFFICER:
+            raise HTTPException(status_code=403, detail=f"Access denied: Not assigned to case {ev.case_id}")
 
     quarantine_count = db.query(QuarantineRecordModel).filter_by(evidence_id=evidence_id).count()
     quality = db.query(DataQualityReportModel).filter_by(evidence_id=evidence_id).first()
@@ -274,13 +380,40 @@ def get_evidence_status(evidence_id: str, db: Session = Depends(get_db)):
     }
 
 @router.post("/evidence/{evidence_id}/verify-integrity")
-def verify_evidence_integrity(evidence_id: str, db: Session = Depends(get_db)):
+def verify_evidence_integrity(
+    evidence_id: str,
+    request: Request,
+    current_user: UserModel = Depends(require_permission(Permissions.EVIDENCE_VIEW)),
+    db: Session = Depends(get_db)
+):
     """Tamper-evident verification: recalculates SHA-256 hash against stored encrypted object."""
     ev = db.query(EvidenceModel).filter_by(evidence_id=evidence_id).first()
     if not ev:
         raise HTTPException(status_code=404, detail="Evidence not found")
 
+    role_name = current_user.role.name if current_user.role else ""
+    if role_name not in (Roles.SYSTEM_ADMIN, Roles.SUPERINTENDENT, Roles.AUDITOR):
+        is_member = db.query(CaseMemberModel).filter_by(
+            case_id=ev.case_id, user_id=current_user.id, active=True
+        ).first()
+        if not is_member and role_name != Roles.IPS_OFFICER:
+            raise HTTPException(status_code=403, detail=f"Access denied: Not assigned to case {ev.case_id}")
+
     is_valid = storage_service.verify_integrity(ev.storage_path, ev.sha256)
+
+    record_audit_event(
+        action=AuditAction.EVIDENCE_VERIFIED,
+        result="SUCCESS" if is_valid else "FAILURE",
+        user_id=current_user.id,
+        actor=current_user.official_email,
+        role=role_name,
+        case_id=ev.case_id,
+        evidence_id=evidence_id,
+        details={"filename": ev.original_filename, "verified": is_valid},
+        ip_address=get_client_ip(request),
+        db=db
+    )
+
     return {
         "evidence_id": evidence_id,
         "filename": ev.original_filename,
@@ -290,11 +423,29 @@ def verify_evidence_integrity(evidence_id: str, db: Session = Depends(get_db)):
     }
 
 @router.delete("/{case_id}")
-def delete_case(case_id: str, db: Session = Depends(get_db)):
+def delete_case(
+    case_id: str,
+    request: Request,
+    current_user: UserModel = Depends(require_permission(Permissions.CASE_DELETE)),
+    db: Session = Depends(get_db)
+):
     """Permanently deletes a case and all associated data across Postgres, Neo4j, MinIO, and Redis."""
     case = db.query(CaseModel).filter_by(case_id=case_id).first()
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
+
+    role_name = current_user.role.name if current_user.role else ""
+    record_audit_event(
+        action=AuditAction.CASE_DELETED,
+        result="SUCCESS",
+        user_id=current_user.id,
+        actor=current_user.official_email,
+        role=role_name,
+        case_id=case_id,
+        details={"case_title": case.title, "case_reference": case.case_reference},
+        ip_address=get_client_ip(request),
+        db=db
+    )
 
     # Delete PostgreSQL records
     db.query(AnomalyFindingModel).filter(AnomalyFindingModel.case_id == case_id).delete()
@@ -349,8 +500,24 @@ def delete_case(case_id: str, db: Session = Depends(get_db)):
     return {"status": "success", "message": f"Case {case_id} deleted successfully"}
 
 @router.delete("")
-def delete_all_cases(db: Session = Depends(get_db)):
-    """Wipes all cases and associated data across all databases for a clean slate."""
+def delete_all_cases(
+    request: Request,
+    current_user: UserModel = Depends(require_permission(Permissions.ROLE_MANAGE)),
+    db: Session = Depends(get_db)
+):
+    """Wipes all cases and associated data across all databases for a clean slate. Requires SYSTEM_CONFIG."""
+    role_name = current_user.role.name if current_user.role else ""
+    record_audit_event(
+        action=AuditAction.SYSTEM_RESET,
+        result="SUCCESS",
+        user_id=current_user.id,
+        actor=current_user.official_email,
+        role=role_name,
+        details={"action": "delete_all_cases"},
+        ip_address=get_client_ip(request),
+        db=db
+    )
+
     db.query(AnomalyFindingModel).delete()
     db.query(AnomalyRunModel).delete()
     db.query(DetectionSignalModel).delete()
@@ -389,4 +556,5 @@ def delete_all_cases(db: Session = Depends(get_db)):
         logger.warning(f"Redis cleanup failed: {e}")
 
     return {"status": "success", "message": "All cases and data purged successfully"}
+
 

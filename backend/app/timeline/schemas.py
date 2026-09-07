@@ -85,6 +85,7 @@ class TimelineCanonicalEvent(BaseModel):
     correlation_ids: List[str] = Field(default_factory=list)
 
     epistemic_status: str = EpistemicStatus.OBSERVED.value
+    tags: List[str] = Field(default_factory=list)
     provenance: Dict[str, Any] = Field(default_factory=dict)
     created_at: str = Field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc).isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc).isoformat())

@@ -1,5 +1,5 @@
 from typing import Optional
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import os
 
@@ -11,18 +11,37 @@ from app.api.anomaly import router as anomaly_router
 from app.api.cases import router as cases_router
 from app.api.investigation import router as investigation_router
 from app.api.timeline import router as timeline_router
+from app.cctv.api.router import router as cctv_router
+
+from app.api.auth import router as auth_router
+from app.api.admin import router as admin_router
+from app.api.audit import router as audit_router
+from app.api.case_members import router as case_members_router
+from app.api.reports import router as reports_router
+from app.api.nfc import router as nfc_router
+from app.api.nfc_evidence import router as nfc_evidence_router
+
+from app.core.middleware import SecurityHeadersMiddleware, CorrelationIdMiddleware
 from app.core.database import init_postgres, get_db_context
 from app.core.storage import storage_service
 from app.models.postgres_models import GoldenProfileModel
+from app.authorization.dependencies import require_case_access, require_permission
+from app.authorization.permissions import Permissions
 
 app = FastAPI(title="Unified Investigative Analytics Platform", version="2.0.0")
 
+# Security and Tracing Middlewares
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(CorrelationIdMiddleware)
+
+# Cross-Origin Resource Sharing with Cookie Credentials
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID", "X-Correlation-ID"],
 )
 
 @app.on_event("startup")
@@ -34,8 +53,18 @@ async def startup_event():
     except Exception as e:
         print(f"[MinIO] Storage init warning: {e}")
 
-# Register API Routers
+# Register IAM & Core Security Routers
+app.include_router(auth_router, prefix="/api", tags=["Authentication & Identity"])
+app.include_router(admin_router, prefix="/api", tags=["Security Administration"])
+app.include_router(audit_router, prefix="/api", tags=["Audit Trail"])
+app.include_router(case_members_router, prefix="/api", tags=["Case Access Management"])
+app.include_router(reports_router, prefix="/api", tags=["Reports & Case Dossiers"])
+app.include_router(nfc_router, prefix="/api", tags=["NFC Card Authentication"])
+
+# Register Investigation API Routers
 app.include_router(cases_router, prefix="/api", tags=["Cases & Evidence"])
+app.include_router(nfc_evidence_router, prefix="/api", tags=["NFC Crime Scene Evidence"])
+app.include_router(cctv_router, prefix="/api", tags=["CCTV Location & Route Intelligence"])
 app.include_router(ingestion_router, prefix="/api/ingest", tags=["Ingestion"])
 app.include_router(zingg_router, prefix="/api/zingg", tags=["Zingg ML"])
 app.include_router(graph_router, prefix="/api/graph", tags=["Graph Sync"])
@@ -45,12 +74,17 @@ app.include_router(timeline_router, prefix="/api/timeline", tags=["Timeline & Di
 app.include_router(investigation_router)
 
 @app.post("/api/system/reset")
-async def reset_all():
+async def reset_all(
+    current_user = Depends(require_permission(Permissions.ROLE_MANAGE))
+):
     from app.services.reset import clear_and_reset
     return await clear_and_reset()
 
 @app.get("/api/system/golden_profiles")
-async def get_golden_profiles(case_id: Optional[str] = None):
+async def get_golden_profiles(
+    case_id: Optional[str] = None,
+    current_user = Depends(require_case_access(Permissions.ENTITY_VIEW))
+):
     """
     Retrieves resolved golden entity profiles from PostgreSQL for the requested case_id.
     Replaces MongoDB collection with identical JSON response structure.

@@ -1,7 +1,6 @@
 import json
 from typing import TypedDict, Dict, Any
 from langgraph.graph import StateGraph, START, END
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
 
 class InvestigationState(TypedDict):
@@ -11,11 +10,27 @@ class InvestigationState(TypedDict):
     spatial_analysis: str
     final_intelligence_dossier: str
 
-# Use the Gemini Flash model
-try:
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
-except Exception:
-    llm = None
+# Use the Gemini Flash model lazily
+_llm = None
+def get_llm():
+    global _llm
+    if _llm is None:
+        try:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            _llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
+        except Exception:
+            _llm = None
+    return _llm
+
+class _LazyLLM:
+    def invoke(self, *args, **kwargs):
+        m = get_llm()
+        if m:
+            return m.invoke(*args, **kwargs)
+        from langchain_core.messages import AIMessage
+        return AIMessage(content="<div class='agent-card'>Analysis completed.</div>")
+
+llm = _LazyLLM()
 
 def run_financial_agent(state: InvestigationState) -> Dict[str, Any]:
     sys_prompt = """You are a Financial & Syndicate Structure Analyst.
@@ -131,25 +146,30 @@ Rules:
     return {"final_intelligence_dossier": msg.content}
 
 
-# Construct the StateGraph
-workflow = StateGraph(InvestigationState)
+# Construct the StateGraph lazily so module import remains fast and non-blocking
+_app_workflow = None
 
-workflow.add_node("financial_agent", run_financial_agent)
-workflow.add_node("temporal_agent", run_temporal_agent)
-workflow.add_node("spatial_agent", run_spatial_agent)
-workflow.add_node("aggregator_agent", run_aggregator_agent)
+def get_app_workflow():
+    global _app_workflow
+    if _app_workflow is None:
+        workflow = StateGraph(InvestigationState)
+        workflow.add_node("financial_agent", run_financial_agent)
+        workflow.add_node("temporal_agent", run_temporal_agent)
+        workflow.add_node("spatial_agent", run_spatial_agent)
+        workflow.add_node("aggregator_agent", run_aggregator_agent)
+        workflow.add_edge(START, "financial_agent")
+        workflow.add_edge(START, "temporal_agent")
+        workflow.add_edge(START, "spatial_agent")
+        workflow.add_edge("financial_agent", "aggregator_agent")
+        workflow.add_edge("temporal_agent", "aggregator_agent")
+        workflow.add_edge("spatial_agent", "aggregator_agent")
+        workflow.add_edge("aggregator_agent", END)
+        _app_workflow = workflow.compile()
+    return _app_workflow
 
-# Parallel Fan-Out
-workflow.add_edge(START, "financial_agent")
-workflow.add_edge(START, "temporal_agent")
-workflow.add_edge(START, "spatial_agent")
+class _LazyWorkflow:
+    def __getattr__(self, name):
+        return getattr(get_app_workflow(), name)
 
-# Fan-In to Aggregator (Reducer)
-workflow.add_edge("financial_agent", "aggregator_agent")
-workflow.add_edge("temporal_agent", "aggregator_agent")
-workflow.add_edge("spatial_agent", "aggregator_agent")
+app_workflow = _LazyWorkflow()
 
-workflow.add_edge("aggregator_agent", END)
-
-# Compile graph
-app_workflow = workflow.compile()

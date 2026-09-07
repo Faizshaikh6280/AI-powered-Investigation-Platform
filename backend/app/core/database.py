@@ -82,12 +82,32 @@ def init_postgres():
     try:
         # Import models so they are registered with Base.metadata
         import app.models.postgres_models  # noqa: F401
+        import app.models.iam_models       # noqa: F401
+        import app.models.nfc_models       # noqa: F401
+        import app.models.nfc_evidence_models  # noqa: F401
+        import app.cctv.models             # noqa: F401
         Base.metadata.create_all(bind=engine)
         _postgres_initialized = True
 
-        # Ensure all columns exist in anomaly_findings (in case table was created by older schema)
+        # Ensure all columns exist in anomaly_findings and audit_logs
         from sqlalchemy import text
         migration_statements = [
+            "ALTER TABLE cases ADD COLUMN IF NOT EXISTS unit_id VARCHAR(64);",
+            "ALTER TABLE cases ADD COLUMN IF NOT EXISTS sensitivity VARCHAR(32) DEFAULT 'INTERNAL';",
+            "ALTER TABLE evidence ADD COLUMN IF NOT EXISTS sensitivity VARCHAR(32) DEFAULT 'SENSITIVE';",
+            "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS audit_id VARCHAR(64);",
+            "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);",
+            "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS role VARCHAR(64);",
+            "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS organization_id VARCHAR(64);",
+            "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS unit_id VARCHAR(64);",
+            "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS resource_type VARCHAR(64);",
+            "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS resource_id VARCHAR(128);",
+            "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS result VARCHAR(32) DEFAULT 'SUCCESS';",
+            "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS reason TEXT;",
+            "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS ip_address VARCHAR(64);",
+            "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS user_agent VARCHAR(512);",
+            "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS request_id VARCHAR(64);",
+            "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS correlation_id VARCHAR(64);",
             "ALTER TABLE anomaly_findings ADD COLUMN IF NOT EXISTS category VARCHAR(64) DEFAULT 'GENERAL';",
             "ALTER TABLE anomaly_findings ADD COLUMN IF NOT EXISTS pattern_type VARCHAR(64);",
             "ALTER TABLE anomaly_findings ADD COLUMN IF NOT EXISTS what_happened TEXT;",
@@ -117,6 +137,16 @@ def init_postgres():
                 for stmt in migration_statements:
                     conn.execute(text(stmt))
 
-        logger.info("[PostgreSQL] Tables verified and migrations executed successfully.")
+        # Seed initial IAM roles, permissions, admin and test officers
+        try:
+            from app.core.seed_iam import seed_iam_defaults
+            from app.core.seed_nfc import seed_nfc_benchmark_cards
+            with get_db_context() as db:
+                seed_iam_defaults(db)
+                seed_nfc_benchmark_cards(db)
+        except Exception as se:
+            logger.warning(f"[IAM Seed] Seeding warning: {se}")
+
+        logger.info("[PostgreSQL] Tables verified, migrations, IAM and NFC seeding executed successfully.")
     except Exception as e:
         logger.warning(f"[PostgreSQL] Warning during table initialization: {e}")

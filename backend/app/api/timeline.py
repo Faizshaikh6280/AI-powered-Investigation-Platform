@@ -3,12 +3,31 @@ import csv
 import json
 import logging
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, HTTPException, Query, Response, Depends, Request
+from sqlalchemy.orm import Session
+from app.core.database import get_db
+from app.models.iam_models import UserModel, CaseMemberModel
+from app.authorization.dependencies import require_permission, get_client_ip
+from app.authorization.permissions import Permissions
+from app.authorization.roles import Roles
+from app.audit.audit_service import record_audit_event, AuditAction
 from app.timeline.service import timeline_service
 from app.timeline.schemas import TimelineQueryResponse, TimelineCanonicalEvent, StorylineSequence
 
 logger = logging.getLogger("investigation.api.timeline")
 router = APIRouter()
+
+def check_case_view_access(case_id: Optional[str], current_user: UserModel, db: Session):
+    if not case_id:
+        return
+    role_name = current_user.role.name if current_user.role else ""
+    if role_name in (Roles.SYSTEM_ADMIN, Roles.SUPERINTENDENT, Roles.AUDITOR, Roles.IPS_OFFICER):
+        return
+    is_member = db.query(CaseMemberModel).filter_by(
+        case_id=case_id, user_id=current_user.id, active=True
+    ).first()
+    if not is_member:
+        raise HTTPException(status_code=403, detail=f"Access denied: Not assigned to case {case_id}")
 
 @router.get("/events", response_model=TimelineQueryResponse)
 def get_timeline_events(
@@ -24,12 +43,17 @@ def get_timeline_events(
     search: Optional[str] = Query(None, description="Free-text search query across actors, narration, location"),
     zoom: str = Query("minute", description="Zoom level: month, day, hour, minute"),
     limit: int = Query(300, ge=1, le=5000),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
+    current_user: UserModel = Depends(require_permission(Permissions.TIMELINE_VIEW)),
+    db: Session = Depends(get_db)
 ):
     """
     Primary timeline query endpoint. Retrieves canonical temporal events, time-density histograms,
     active correlations, bursts, and inconsistency alerts.
     """
+    target_case_id = timeline_service._resolve_case_id(case_id)
+    check_case_view_access(target_case_id, current_user, db)
+
     entity_list = [e.strip() for e in entities.split(",") if e.strip()] if entities else None
     domain_list = [d.strip() for d in domains.split(",") if d.strip()] if domains else None
     type_list = [t.strip() for t in event_types.split(",") if t.strip()] if event_types else None
@@ -52,11 +76,17 @@ def get_timeline_events(
     )
 
 @router.get("/events/{event_id}")
-def get_event_detail(event_id: str, case_id: Optional[str] = None):
+def get_event_detail(
+    event_id: str,
+    case_id: Optional[str] = None,
+    current_user: UserModel = Depends(require_permission(Permissions.TIMELINE_VIEW)),
+    db: Session = Depends(get_db)
+):
     """Retrieves full granular details, telemetry, and evidence provenance for an individual event."""
     target_case_id = timeline_service._resolve_case_id(case_id)
     if not target_case_id:
         raise HTTPException(status_code=404, detail="No active case found.")
+    check_case_view_access(target_case_id, current_user, db)
 
     artifacts = timeline_service.get_or_build_timeline_artifacts(target_case_id)
     ev = next((e for e in artifacts["events"] if e.event_id == event_id), None)
@@ -68,11 +98,16 @@ def get_event_detail(event_id: str, case_id: Optional[str] = None):
 def get_event_context(
     event_id: str,
     case_id: Optional[str] = None,
-    window_minutes: int = Query(15, ge=1, le=1440, description="Temporal window size in minutes (±)")
+    window_minutes: int = Query(15, ge=1, le=1440, description="Temporal window size in minutes (±)"),
+    current_user: UserModel = Depends(require_permission(Permissions.TIMELINE_VIEW)),
+    db: Session = Depends(get_db)
 ):
     """
     Returns immediate temporal neighborhood events around a selected event (±5m, ±15m, ±30m, ±1h).
     """
+    target_case_id = timeline_service._resolve_case_id(case_id)
+    check_case_view_access(target_case_id, current_user, db)
+
     res = timeline_service.get_event_context(
         event_id=event_id,
         case_id=case_id,
@@ -83,46 +118,75 @@ def get_event_context(
     return res
 
 @router.get("/correlations")
-def get_correlations(case_id: Optional[str] = None):
+def get_correlations(
+    case_id: Optional[str] = None,
+    current_user: UserModel = Depends(require_permission(Permissions.TIMELINE_VIEW)),
+    db: Session = Depends(get_db)
+):
     """Retrieves discovered cross-domain temporal correlations for the case."""
     target_case_id = timeline_service._resolve_case_id(case_id)
     if not target_case_id:
         return []
+    check_case_view_access(target_case_id, current_user, db)
+
     artifacts = timeline_service.get_or_build_timeline_artifacts(target_case_id)
     return artifacts.get("correlations", [])
 
 @router.get("/bursts")
-def get_activity_bursts(case_id: Optional[str] = None):
+def get_activity_bursts(
+    case_id: Optional[str] = None,
+    current_user: UserModel = Depends(require_permission(Permissions.TIMELINE_VIEW)),
+    db: Session = Depends(get_db)
+):
     """Retrieves detected activity bursts (high-density temporal episodes)."""
     target_case_id = timeline_service._resolve_case_id(case_id)
     if not target_case_id:
         return []
+    check_case_view_access(target_case_id, current_user, db)
+
     artifacts = timeline_service.get_or_build_timeline_artifacts(target_case_id)
     return artifacts.get("bursts", [])
 
 @router.get("/inconsistencies")
-def get_inconsistencies(case_id: Optional[str] = None):
+def get_inconsistencies(
+    case_id: Optional[str] = None,
+    current_user: UserModel = Depends(require_permission(Permissions.TIMELINE_VIEW)),
+    db: Session = Depends(get_db)
+):
     """Retrieves detected temporal/geospatial velocity inconsistencies."""
     target_case_id = timeline_service._resolve_case_id(case_id)
     if not target_case_id:
         return []
+    check_case_view_access(target_case_id, current_user, db)
+
     artifacts = timeline_service.get_or_build_timeline_artifacts(target_case_id)
     return artifacts.get("inconsistencies", [])
 
 @router.get("/storylines", response_model=List[StorylineSequence])
 @router.get("/storyline", response_model=List[StorylineSequence])
-def get_storylines(case_id: Optional[str] = None):
+def get_storylines(
+    case_id: Optional[str] = None,
+    current_user: UserModel = Depends(require_permission(Permissions.TIMELINE_VIEW)),
+    db: Session = Depends(get_db)
+):
     """Retrieves reconstructed storyline sequences with grounded intelligence assessments."""
+    target_case_id = timeline_service._resolve_case_id(case_id)
+    check_case_view_access(target_case_id, current_user, db)
     return timeline_service.get_storylines(case_id=case_id)
 
 @router.get("/compare")
 def get_compare_streams(
     entities: str = Query(..., description="Comma-separated list of entity names or cluster IDs to compare"),
-    case_id: Optional[str] = None
+    case_id: Optional[str] = None,
+    current_user: UserModel = Depends(require_permission(Permissions.TIMELINE_VIEW)),
+    db: Session = Depends(get_db)
 ):
     """
     Returns aligned parallel temporal streams for side-by-side entity comparison.
     """
+    target_case_id = timeline_service._resolve_case_id(case_id)
+    check_case_view_access(target_case_id, current_user, db)
+
     entity_keys = [e.strip() for e in entities.split(",") if e.strip()]
     if not entity_keys:
         raise HTTPException(status_code=400, detail="At least one entity must be specified for comparison.")
@@ -133,17 +197,37 @@ def export_timeline_dossier(
     case_id: Optional[str] = None,
     format: str = Query("json", description="Export format: json or csv"),
     entities: Optional[str] = None,
-    domains: Optional[str] = None
+    domains: Optional[str] = None,
+    request: Request = None,
+    current_user: UserModel = Depends(require_permission(Permissions.TIMELINE_EXPORT)),
+    db: Session = Depends(get_db)
 ):
     """
     Court-ready forensic timeline export with cryptographic evidence references.
     """
+    target_case_id = timeline_service._resolve_case_id(case_id)
+    check_case_view_access(target_case_id, current_user, db)
+
     query_res = get_timeline_events(
         case_id=case_id,
         entities=entities,
         domains=domains,
         limit=5000,
-        offset=0
+        offset=0,
+        current_user=current_user,
+        db=db
+    )
+
+    record_audit_event(
+        action=AuditAction.TIMELINE_EXPORTED,
+        result="SUCCESS",
+        user_id=current_user.id,
+        actor=current_user.official_email,
+        role=current_user.role.name if current_user.role else None,
+        case_id=target_case_id,
+        details={"format": format, "total_events": query_res.summary.total_events},
+        ip_address=get_client_ip(request) if request else None,
+        db=db
     )
 
     if format.lower() == "csv":
@@ -192,3 +276,4 @@ def export_timeline_dossier(
         "bursts": [b.dict() if hasattr(b, 'dict') else b.model_dump() for b in query_res.bursts],
         "inconsistencies": [i.dict() if hasattr(i, 'dict') else i.model_dump() for i in query_res.inconsistencies]
     }
+
