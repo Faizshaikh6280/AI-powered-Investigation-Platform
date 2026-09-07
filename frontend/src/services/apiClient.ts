@@ -284,9 +284,13 @@ export const apiClient = {
     return handleResponse<{ message: string; result: AnomalyRunResult }>(res);
   },
 
-  // === SYSTEM RESET ===
   async resetSystem(): Promise<any> {
     const res = await fetch(`${API_BASE}/api/system/reset`, { method: 'POST' });
     return handleResponse<any>(res);
+  },
+
+  async request<T = any>(endpoint: string, options?: RequestInit): Promise<T> {
+    const res = await fetch(`${API_BASE}${endpoint}`, options);
+    return handleResponse<T>(res);
   }
 };

@@ -118,9 +118,29 @@ async def sync_mongo_to_neo4j():
             cluster_id = ev.get("z_cluster_id")
             telemetry = ev.get("telemetry", {})
             financial = ev.get("financial", {})
-            identity = ev.get("normalized_identity", {})
+            identity = ev.get("normalized_identity") or ev.get("entities") or {}
             timestamp = ev.get("timestamp", "")
             phone = identity.get("phone")
+            event_type = ev.get("event_type", "")
+            attributes = ev.get("attributes") or {}
+
+            # Call Detail Records (CALLED)
+            called = attributes.get("called_number")
+            if (event_type == "CALL" or called) and not is_empty(phone) and not is_empty(called):
+                session.run("""
+                    MERGE (p1:Phone {number: $phone})
+                    MERGE (p2:Phone {number: $called})
+                    MERGE (p1)-[r:CALLED]->(p2)
+                    SET r.last_seen = $timestamp,
+                        r.duration  = $duration,
+                        r.call_id   = $call_id
+                """, {
+                    "phone": str(phone).strip(),
+                    "called": str(called).strip(),
+                    "timestamp": timestamp,
+                    "duration": telemetry.get("duration_seconds", 0),
+                    "call_id": attributes.get("call_id", "")
+                })
 
             # IMEI → Phone (USED_DEVICE)
             imei = telemetry.get("imei")

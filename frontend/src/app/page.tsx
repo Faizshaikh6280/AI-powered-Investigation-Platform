@@ -25,7 +25,7 @@ import AnomalyInvestigationDrawer from '../components/AnomalyInvestigationDrawer
 import CaseDossierExporter from '../components/CaseDossierExporter';
 import AuditTrailLogs from '../components/AuditTrailLogs';
 import { InvestigationDashboard } from '../components/InvestigationDashboard';
-import { CreateCaseModal } from '../components/CreateCaseModal';
+import CreateCaseModal from '../components/CreateCaseModal';
 
 const navigation = [
   { id: 'overview', label: 'Overview', icon: Activity },

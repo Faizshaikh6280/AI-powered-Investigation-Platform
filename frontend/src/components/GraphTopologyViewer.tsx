@@ -5,7 +5,8 @@ import {
   ChevronRight, X, AlertTriangle, Phone, FileText, Share2,
   MapPin, AtSign, Mail, ArrowRight, Clock, Network, 
   UserRound, Landmark, WalletCards, ArrowLeftRight, MessagesSquare, Building2,
-  RefreshCcw, Activity, Cpu, Fingerprint, RadioTower, Monitor
+  RefreshCcw, Activity, Cpu, Fingerprint, RadioTower, Monitor,
+  Tag
 } from 'lucide-react';
 import cytoscape from 'cytoscape';
 import dagre from 'cytoscape-dagre';
@@ -14,12 +15,12 @@ import fcose from 'cytoscape-fcose';
 import { useTheme } from 'next-themes';
 import { cn } from '../utils/cn';
 
-// Register layouts
-if (!cytoscape.layouts || !cytoscape.layouts.some((l: any) => l.name === 'dagre')) {
+// Register layouts safely
+try {
   cytoscape.use(dagre);
   cytoscape.use(cola);
   cytoscape.use(fcose);
-}
+} catch (e) {}
 
 // Map types to icons/colors
 const getTypeConfig = (type: string) => {
@@ -83,6 +84,7 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
   const [loading, setLoading] = useState(true);
   const [layoutName, setLayoutName] = useState('fcose');
   const [searchQuery, setSearchQuery] = useState('');
+  const [showEdgeLabels, setShowEdgeLabels] = useState(false);
   
   // Filters including IMEI and CellTower
   const [activeFilters, setActiveFilters] = useState<Record<string, boolean>>({
@@ -129,7 +131,7 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
   }, [graphData]);
 
   // Stylesheet generator based on theme
-  const getGraphStyle = (dark: boolean) => {
+  const getGraphStyle = (dark: boolean, showLabels: boolean = false) => {
     const txtColor = dark ? '#f1f5f9' : '#0f172a';
     const lineCol = dark ? '#475569' : '#cbd5e1';
     const hlColor = dark ? '#818cf8' : '#4f46e5';
@@ -140,30 +142,60 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
         selector: 'node',
         style: {
           'shape': 'ellipse',
-          'width': 56,
-          'height': 56,
+          'width': (ele: any) => {
+            const pr = Number(ele.data('pagerank') || 0);
+            if (pr >= 0.3) return 64;
+            if (pr >= 0.2 || ele.data('type') === 'Person') return 52;
+            return 44;
+          },
+          'height': (ele: any) => {
+            const pr = Number(ele.data('pagerank') || 0);
+            if (pr >= 0.3) return 64;
+            if (pr >= 0.2 || ele.data('type') === 'Person') return 52;
+            return 44;
+          },
           'background-color': 'data(color)',
-          'border-width': 2,
-          'border-color': 'data(color)',
-          'border-opacity': 0.8,
+          'border-width': (ele: any) => {
+            const bw = Number(ele.data('betweenness') || 0);
+            const pr = Number(ele.data('pagerank') || 0);
+            if (bw >= 1.0 || pr >= 0.3) return 3.5;
+            return 2;
+          },
+          'border-color': (ele: any) => {
+            const bw = Number(ele.data('betweenness') || 0);
+            const pr = Number(ele.data('pagerank') || 0);
+            if (pr >= 0.3) return '#ef4444'; // Red kingpin ring
+            if (bw >= 1.0) return '#f59e0b'; // Gold broker border accent
+            return ele.data('color');
+          },
+          'border-opacity': 0.9,
           'label': 'data(label)',
           'color': txtColor,
           'text-valign': 'bottom',
           'text-halign': 'center',
-          'text-margin-y': 8,
-          'font-size': '12px',
+          'text-margin-y': 7,
+          'font-size': '11px',
           'font-weight': '600',
           'text-wrap': 'wrap',
-          'text-max-width': '120px',
+          'text-max-width': '110px',
           'background-image': (ele: any) => getSvgDataUri(ele.data('type')),
-          'background-width': '16px', // Extremely compact proportional size
+          'background-width': '16px',
           'background-height': '16px',
           'background-fit': 'contain',
           'background-position-x': '50%',
           'background-position-y': '50%',
-          'shadow-blur': 10,
-          'shadow-color': 'data(color)',
-          'shadow-opacity': 0.2,
+          'shadow-blur': (ele: any) => {
+            const pr = Number(ele.data('pagerank') || 0);
+            return pr >= 0.3 ? 20 : 8;
+          },
+          'shadow-color': (ele: any) => {
+            const bw = Number(ele.data('betweenness') || 0);
+            const pr = Number(ele.data('pagerank') || 0);
+            if (pr >= 0.3) return '#ef4444';
+            if (bw >= 1.0) return '#f59e0b';
+            return ele.data('color');
+          },
+          'shadow-opacity': 0.35,
           'transition-property': 'background-color, border-color, shadow-color',
           'transition-duration': 0.3
         }
@@ -176,17 +208,17 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
           'target-arrow-color': lineCol,
           'target-arrow-shape': 'triangle',
           'curve-style': 'bezier',
-          'label': 'data(label)',
-          'font-size': '10px',
-          'font-weight': 'bold',
+          'label': showLabels ? 'data(label)' : '',
+          'font-size': '9px',
+          'font-weight': '600',
           'color': txtColor,
           'text-background-color': bgCol,
-          'text-background-opacity': 1,
-          'text-background-padding': '4px',
+          'text-background-opacity': showLabels ? 0.92 : 0,
+          'text-background-padding': '2px',
           'text-background-shape': 'roundrectangle',
           'text-border-color': lineCol,
-          'text-border-width': 1,
-          'text-border-opacity': 0.5,
+          'text-border-width': showLabels ? 1 : 0,
+          'text-border-opacity': 0.4,
           'edge-text-rotation': 'autorotate',
           'transition-property': 'line-color, target-arrow-color, color, text-background-color, text-border-color',
           'transition-duration': 0.3
@@ -197,8 +229,8 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
         style: {
           'border-color': hlColor,
           'border-width': 4,
-          'width': 64,
-          'height': 64,
+          'width': 58,
+          'height': 58,
           'shadow-blur': 20,
           'shadow-color': hlColor,
           'shadow-opacity': 0.5
@@ -217,6 +249,10 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
           'line-color': hlColor,
           'target-arrow-color': hlColor,
           'width': 2.5,
+          'label': 'data(label)',
+          'text-background-opacity': 0.95,
+          'text-background-padding': '3px',
+          'text-border-width': 1,
           'z-index': 999
         }
       },
@@ -229,12 +265,12 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
     ];
   };
 
-  // Immediate theme synchronization without destroying the graph
+  // Immediate theme & label synchronization without destroying the graph
   useEffect(() => {
     if (cyRef.current && mounted) {
-      cyRef.current.style(getGraphStyle(isDark));
+      cyRef.current.style(getGraphStyle(isDark, showEdgeLabels));
     }
-  }, [isDark, mounted]);
+  }, [isDark, showEdgeLabels, mounted]);
 
   // Main graph initialization and filtering logic
   useEffect(() => {
@@ -254,25 +290,47 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
 
     const elements: any[] = [];
     filteredNodes.forEach((n: any) => {
+      const pr = Number(n.properties?.pagerank || 0);
+      const bw = Number(n.properties?.betweenness || 0);
       elements.push({
         data: { 
           id: n.id, 
           label: n.label || n.properties?.id || n.id, 
           type: n.type, 
           properties: n.properties,
-          risk: n.properties?.risk_level || 'LOW',
-          color: getTypeConfig(n.type).color
+          risk: n.properties?.risk_level || (pr >= 0.3 ? 'HIGH' : 'LOW'),
+          color: getTypeConfig(n.type).color,
+          pagerank: pr,
+          betweenness: bw
         }
       });
     });
+
     filteredEdges.forEach((e: any) => {
+      const props = e.properties || {};
+      let edgeLabel = e.relationship || '';
+      
+      // Enhance relationship label if amount or duration is present
+      if (props.amount !== undefined && props.amount !== null && props.amount !== '') {
+        const amt = Number(props.amount);
+        const formattedAmt = !isNaN(amt)
+          ? (amt >= 100000 ? `₹${(amt / 100000).toFixed(1)}L` : `₹${amt.toLocaleString()}`)
+          : `₹${props.amount}`;
+        edgeLabel = `${e.relationship} (${formattedAmt})`;
+      } else if (props.duration !== undefined && props.duration !== null) {
+        edgeLabel = `${e.relationship} (${props.duration}s)`;
+      } else if (props.call_duration !== undefined && props.call_duration !== null) {
+        edgeLabel = `${e.relationship} (${props.call_duration}s)`;
+      }
+
       elements.push({
         data: { 
           id: e.id, 
           source: e.source, 
           target: e.target, 
-          label: e.relationship,
-          properties: e.properties || {} 
+          label: edgeLabel,
+          relationship: e.relationship,
+          properties: props 
         }
       });
     });
@@ -281,21 +339,100 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
       cyRef.current.destroy();
     }
 
+    const getLayoutConfig = (name: string) => {
+      switch (name) {
+        case 'fcose':
+          return {
+            name: 'fcose',
+            quality: 'proof',
+            randomize: true,
+            animate: true,
+            animationDuration: 900,
+            fit: true,
+            padding: 100,
+            nodeDimensionsIncludeLabels: true,
+            uniformNodeDimensions: false,
+            packComponents: true,
+            samplingType: true,
+            sampleSize: 35,
+            nodeRepulsion: (node: any) => {
+              const pr = Number(node.data('pagerank') || 0);
+              return pr >= 0.3 ? 260000 : 180000;
+            },
+            idealEdgeLength: () => 320,
+            edgeElasticity: 0.45,
+            nestingFactor: 0.1,
+            gravity: 0.04,
+            gravityRange: 1.5,
+            gravityCompound: 1.0,
+            gravityRangeCompound: 1.5,
+            numIter: 2500,
+            tile: true,
+            tilingPaddingVertical: 100,
+            tilingPaddingHorizontal: 100,
+            componentSpacing: 280
+          };
+        case 'cola':
+          return {
+            name: 'cola',
+            animate: true,
+            refresh: 1,
+            maxSimulationTime: 3000,
+            ungrabifyWhileSimulating: false,
+            fit: true,
+            padding: 90,
+            nodeSpacing: () => 75,
+            edgeLength: 200,
+            convergenceThreshold: 0.01
+          };
+        case 'dagre':
+          return {
+            name: 'dagre',
+            rankDir: 'TB',
+            nodeSep: 100,
+            rankSep: 140,
+            padding: 90,
+            fit: true
+          };
+        case 'concentric':
+          return {
+            name: 'concentric',
+            fit: true,
+            padding: 90,
+            minNodeSpacing: 80,
+            concentric: (node: any) => Number(node.data('pagerank') || 0) * 10
+          };
+        case 'breadthfirst':
+          return {
+            name: 'breadthfirst',
+            fit: true,
+            directed: true,
+            padding: 90,
+            spacingFactor: 1.75
+          };
+        default:
+          return {
+            name: name,
+            fit: true,
+            padding: 90,
+            animate: true,
+            animationDuration: 600
+          };
+      }
+    };
+
     cyRef.current = cytoscape({
       container: containerRef.current,
       elements: elements,
-      style: getGraphStyle(isDark),
-      layout: {
-        name: layoutName,
-        animate: true,
-        animationDuration: 500,
-        nodeDimensionsIncludeLabels: true,
-        idealEdgeLength: 250, // Increased to spread edges
-        nodeRepulsion: 800000, // Doubled to force nodes apart
-        padding: 80,
-        nodeSeparation: 150, // Increased for wider spacing
-        rankSep: 150,
-        minNodeSpacing: 80
+      style: getGraphStyle(isDark, showEdgeLabels) as any,
+      layout: getLayoutConfig(layoutName)
+    });
+
+    cyRef.current.on('layoutstop', () => {
+      try {
+        cyRef.current?.fit(undefined, 80);
+      } catch (err) {
+        // Safe recovery
       }
     });
 
@@ -446,6 +583,16 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
           </button>
 
           <button 
+            onClick={() => setShowEdgeLabels(prev => !prev)}
+            className={cn("px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-2", 
+              showEdgeLabels ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+            )}
+            title="Toggle Edge Relationship Labels"
+          >
+            <Tag className="w-4 h-4" /> Edge Labels
+          </button>
+
+          <button 
             onClick={fetchData}
             className="px-3 py-1.5 text-sm font-medium rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors flex items-center gap-2 border-l border-border ml-1 pl-3"
             title="Refresh Data"
@@ -593,7 +740,36 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6 space-y-8">
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {/* Algorithmic Intelligence Card */}
+              {(selectedNode.properties?.pagerank !== undefined || selectedNode.properties?.betweenness !== undefined || selectedNode.properties?.communityId !== undefined) && (
+                <div className="bg-primary/5 rounded-xl border border-primary/20 p-4 space-y-2.5">
+                  <h4 className="text-xs font-bold text-primary uppercase tracking-wider flex items-center gap-2">
+                    <Cpu className="w-3.5 h-3.5" /> Graph Intelligence Metrics
+                  </h4>
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="bg-card p-2 rounded-lg border border-border">
+                      <span className="text-[10px] text-muted-foreground uppercase block font-bold">PageRank</span>
+                      <span className="text-sm font-black text-red-500 font-mono">
+                        {Number(selectedNode.properties?.pagerank || 0).toFixed(4)}
+                      </span>
+                    </div>
+                    <div className="bg-card p-2 rounded-lg border border-border">
+                      <span className="text-[10px] text-muted-foreground uppercase block font-bold">Betweenness</span>
+                      <span className="text-sm font-black text-amber-500 font-mono">
+                        {Number(selectedNode.properties?.betweenness || 0).toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="bg-card p-2 rounded-lg border border-border">
+                      <span className="text-[10px] text-muted-foreground uppercase block font-bold">Community</span>
+                      <span className="text-sm font-black text-indigo-500 font-mono">
+                        #{selectedNode.properties?.communityId ?? selectedNode.properties?.community ?? '—'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-3">
                 <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
                   <Activity className="w-3.5 h-3.5" /> Entity Metadata

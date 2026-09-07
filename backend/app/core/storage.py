@@ -25,13 +25,19 @@ class StorageService:
         else:
             self.endpoint_url = endpoint
 
-        # Initialize boto3 S3 client
+        # Initialize boto3 S3 client with short timeouts to avoid blocking startup
         self.s3_client = boto3.client(
             "s3",
             endpoint_url=self.endpoint_url,
             aws_access_key_id=settings.MINIO_ACCESS_KEY,
             aws_secret_access_key=settings.MINIO_SECRET_KEY,
-            config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+            config=Config(
+                signature_version="s3v4",
+                s3={"addressing_style": "path"},
+                connect_timeout=3,
+                read_timeout=5,
+                retries={"max_attempts": 1}
+            ),
             region_name="us-east-1"
         )
 

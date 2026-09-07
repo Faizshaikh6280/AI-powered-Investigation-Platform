@@ -6,6 +6,7 @@ router = APIRouter()
 def extract_label(labels, props):
     return (
         props.get("name") or 
+        props.get("primary_name") or
         props.get("holder") or 
         props.get("number") or 
         props.get("handle") or 
@@ -23,7 +24,9 @@ async def get_graph_topology():
 
     query = """
     MATCH (n) WHERE NOT 'Anomaly' IN labels(n)
-    OPTIONAL MATCH (n)-[r]->(m) WHERE NOT 'Anomaly' IN labels(m)
+    OPTIONAL MATCH (n)-[r]->(m) 
+    WHERE NOT 'Anomaly' IN labels(m)
+      AND NOT type(r) IN ['SIMILAR_BEHAVIOR', 'CO_OFFENDING', 'HAS_ANOMALY']
     RETURN 
         id(n) AS source_id, 
         labels(n) AS source_labels, 

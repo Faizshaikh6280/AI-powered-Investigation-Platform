@@ -7,6 +7,15 @@ module.exports = {
     './src/app/**/*.{ts,tsx}',
     './src/**/*.{ts,tsx}',
   ],
+  safelist: [
+    { pattern: /bg-(slate|red|amber|emerald|cyan|purple)-(50|100|200|300|400|500|600|700|800|900)/ },
+    { pattern: /text-(slate|red|amber|emerald|cyan|purple)-(50|100|200|300|400|500|600|700|800|900)/ },
+    { pattern: /border-(slate|red|amber|emerald|cyan|purple)-(500|600|700|800)/ },
+    { pattern: /shadow-\[.*?\]/ },
+    'backdrop-blur-xl', 'backdrop-blur-md', 'backdrop-blur-sm',
+    'rounded-xl', 'rounded-2xl', 'p-4', 'mb-4', 'mb-6', 'grid', 'grid-cols-1', 'md:grid-cols-2', 'gap-4',
+    'flex', 'flex-col', 'items-center', 'justify-between', 'font-bold', 'text-xl', 'text-lg', 'text-sm'
+  ],
   theme: {
     extend: {
       colors: {

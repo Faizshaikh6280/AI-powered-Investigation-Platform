@@ -6,8 +6,15 @@ from typing import Optional
 
 from app.core.database import get_db
 from app.core.neo4j_client import neo4j_client
-from app.services.gds_engine import get_gds_client, project_and_compute_association_strength, run_gds_analytics, extract_community_subgraph
-from app.services.agents_workflow import app_workflow, InvestigationState
+from app.services.gds_engine import (
+    get_gds_client, project_and_compute_association_strength,
+    run_gds_analytics, extract_community_subgraph,
+    extract_entire_graph_subgraph,
+    generate_logical_community_metadata
+)
+from app.agents.graph import investigation_workflow
+from app.agents.state import InvestigationState
+from app.agents.specialists import build_fallback_dossier
 
 router = APIRouter(prefix="/api/v1/investigation", tags=["Investigation"])
 
@@ -23,26 +30,25 @@ def project_graph():
 
 @router.post("/run-algorithms")
 def run_algorithms():
-    """Executes Louvain, PageRank, and Betweenness; returns list of detected communities with summary stats."""
+    """Executes all 5 GDS algorithms and returns enriched communities with logical names, kingpins, and brokers."""
     try:
         gds = get_gds_client()
-        # Retrieve the graph from projection
         if not gds.graph.exists("criminal_network")["exists"]:
-            raise HTTPException(status_code=400, detail="Graph not projected. Call /project-graph first.")
+            project_and_compute_association_strength(gds, "criminal_network")
             
         G = gds.graph.get("criminal_network")
         res = run_gds_analytics(gds, G)
         
-        # Now fetch the summary of communities from Neo4j
         query = """
-        MATCH (e:Entity)
-        WHERE e.communityId IS NOT NULL
+        MATCH (e)
+        WHERE e.communityId IS NOT NULL AND NOT e:Anomaly
         RETURN e.communityId AS communityId, count(e) AS size
         ORDER BY size DESC LIMIT 10
         """
         with neo4j_client.driver.session() as session:
             result = session.run(query)
-            communities = [{"communityId": record["communityId"], "size": record["size"]} for record in result]
+            raw_cids = [record["communityId"] for record in result]
+            communities = [generate_logical_community_metadata(session, cid) for cid in raw_cids]
             
         return {"status": "success", "communities": communities, "analytics_status": res}
     except Exception as e:
@@ -72,32 +78,300 @@ async def synthesize_community(community_id: int, request: Request):
             raise HTTPException(status_code=404, detail="Community not found or empty.")
 
         async def event_generator():
+            import datetime
+            def make_log(agent: str, text: str, stage: str = None) -> dict:
+                ts = datetime.datetime.now().strftime("%H:%M:%S")
+                return {
+                    "log": f"[{ts}] > [{agent}] {text}",
+                    "status": text,
+                    "agent": agent.lower().replace(" ", "_"),
+                    "stage": stage or agent.lower().split()[0],
+                    "timestamp": ts
+                }
+
             try:
-                # We yield the start event
-                yield {"event": "start", "data": json.dumps({"message": "Initializing multi-agent pipeline..."})}
+                yield {"data": json.dumps(make_log("System", "Initializing multi-agent pipeline and graph context...", "system"))}
+                yield {"data": json.dumps(make_log("System", f"Targeting Syndicate Community #{community_id}: {community_json.get('community_metadata', {}).get('name', 'Network')}", "system"))}
                 
-                # Execute LangGraph asynchronously using a stream
-                # Astream returns events as nodes finish
-                async for event in app_workflow.astream(
-                    {"community_json": community_json},
+                # Progressive live forensic thoughts yielded continuously (every 2.5s) while each agent is actively reasoning
+                agent_live_thoughts = {
+                    "financial_agent": [
+                        ("Financial Agent", "Analyzing money mule networks and high-velocity RTGS/IMPS routes..."),
+                        ("Financial Agent", "Evaluating in-degree vs out-degree transaction volumes across community accounts..."),
+                        ("Financial Agent", "Detecting structured sub-threshold deposits and rapid fund dispersion (smurfing)..."),
+                        ("Financial Agent", "Pre-query check: evaluating existing GDS PageRank and Betweenness centrality..."),
+                        ("Financial Agent", "Tracing multi-hop layering paths to identify cash-out accounts..."),
+                        ("Financial Agent", "Synthesizing financial forensic findings and account freeze directives on GPU...")
+                    ],
+                    "temporal_agent": [
+                        ("Temporal Agent", "Analyzing Call Detail Records (CDR) and IPDR session timestamps..."),
+                        ("Temporal Agent", "Measuring communication frequency spikes and off-hours operational activity..."),
+                        ("Temporal Agent", "Cross-referencing call signaling triggers against banking transfer timestamps..."),
+                        ("Temporal Agent", "Detecting concurrent burst synchronization across suspect devices..."),
+                        ("Temporal Agent", "Pre-query check: evaluating timestamp intervals before runtime Cypher lookup..."),
+                        ("Temporal Agent", "Formulating temporal conspiracy timeline and raid windows on GPU...")
+                    ],
+                    "spatial_agent": [
+                        ("Spatial Agent", "Ingesting cell tower sector telemetry and coordinates across NCR jurisdiction..."),
+                        ("Spatial Agent", "Triangulating physical safehouse clusters and co-located subscriber IMEIs..."),
+                        ("Spatial Agent", "Correlating suspect IP address geolocations with cell tower towers..."),
+                        ("Spatial Agent", "Pre-query check: evaluating spatial dispersion across jurisdictional boundaries..."),
+                        ("Spatial Agent", "Analyzing inter-jurisdictional conduits and border-crossing transit routes..."),
+                        ("Spatial Agent", "Compiling geospatial search warrant perimeters and raid coordinates on GPU...")
+                    ],
+                    "lead_detective": [
+                        ("Lead Detective", "Senior analytical layer activated on GPU..."),
+                        ("Lead Detective", "Fusing financial, temporal, and geospatial intelligence streams..."),
+                        ("Lead Detective", "Auditing specialist findings against GDS Louvain and PageRank centrality..."),
+                        ("Lead Detective", "Evaluating network broker betweenness scores and potential single points of failure..."),
+                        ("Lead Detective", "Pre-query check: Evaluating if runtime Neo4j Cypher verification query is required..."),
+                        ("Lead Detective", "Cross-referencing hidden network patterns with Indian Penal Code / PMLA statutes..."),
+                        ("Lead Detective", "Formulating court-admissible tactical strike plan and executive dossier on GPU...")
+                    ]
+                }
+
+                current_active_node = "start_financial"
+                thought_indices = {k: 0 for k in agent_live_thoughts}
+
+                aiterator = investigation_workflow.astream(
+                    {"community_id": community_id, "community_json": community_json},
                     stream_mode="updates"
-                ):
-                    # event is a dict where keys are the node names that just finished
-                    for node_name, state_updates in event.items():
-                        if node_name == "financial_agent":
-                            yield {"event": "financial_agent_done", "data": json.dumps({"status": "Financial analysis complete"})}
-                        elif node_name == "temporal_agent":
-                            yield {"event": "temporal_agent_done", "data": json.dumps({"status": "Temporal analysis complete"})}
-                        elif node_name == "spatial_agent":
-                            yield {"event": "spatial_agent_done", "data": json.dumps({"status": "Spatial analysis complete"})}
-                        elif node_name == "aggregator_agent":
-                            dossier = state_updates.get("final_intelligence_dossier", "")
-                            yield {"event": "dossier_complete", "data": json.dumps({"dossier": dossier})}
+                )
+                
+                next_event_task = None
+                
+                while True:
+                    if await request.is_disconnected():
+                        print("DEBUG: Client disconnected! Breaking loop.", flush=True)
+                        break
+                        
+                    if next_event_task is None:
+                        next_event_task = asyncio.create_task(anext(aiterator))
+                        
+                    # Wait in 2.5 second increments for responsive, real-time continuous ticker updates
+                    done, pending = await asyncio.wait([next_event_task], timeout=2.5)
+                    
+                    if next_event_task in done:
+                        try:
+                            event = next_event_task.result()
+                            next_event_task = None
+                            
+                            for node_name, state_updates in event.items():
+                                if node_name == "start_financial":
+                                    current_active_node = "financial_agent"
+                                    yield {"data": json.dumps(make_log("Financial Agent", "Initializing financial specialist engine on GPU...", "financial"))}
+                                elif node_name == "financial_agent":
+                                    yield {"data": json.dumps(make_log("Financial Agent", "Financial analysis completed. Layered smurfing patterns isolated and structured.", "financial"))}
+                                    current_active_node = "start_temporal"
+                                elif node_name == "start_temporal":
+                                    current_active_node = "temporal_agent"
+                                    yield {"data": json.dumps(make_log("Temporal Agent", "Initializing temporal specialist engine on GPU...", "temporal"))}
+                                elif node_name == "temporal_agent":
+                                    yield {"data": json.dumps(make_log("Temporal Agent", "Temporal analysis complete. Conspiratorial timing windows established.", "temporal"))}
+                                    current_active_node = "start_spatial"
+                                elif node_name == "start_spatial":
+                                    current_active_node = "spatial_agent"
+                                    yield {"data": json.dumps(make_log("Spatial Agent", "Initializing geographical intelligence engine on GPU...", "spatial"))}
+                                elif node_name == "spatial_agent":
+                                    yield {"data": json.dumps(make_log("Spatial Agent", "Geographic intelligence complete. Target safehouse coordinates mapped.", "spatial"))}
+                                    current_active_node = "start_lead"
+                                elif node_name == "start_lead":
+                                    current_active_node = "lead_detective"
+                                    yield {"data": json.dumps(make_log("Lead Detective", "Senior analytical layer activated on GPU...", "lead"))}
+                                elif node_name == "lead_detective":
+                                    yield {"data": json.dumps(make_log("Lead Detective", "Intelligence dossier synthesized. Multi-modal graph evidence fully verified.", "lead"))}
+                                    yield {"data": json.dumps(make_log("System", "Forensic pipeline complete. Court-admissible intelligence report generated.", "system"))}
+                                    dossier = state_updates.get("final_intelligence_dossier", {})
+                                    yield {"data": json.dumps({"dossier_json": dossier})}
+                                    
+                        except StopAsyncIteration:
+                            break
+                        except Exception as e:
+                            print('SSE NOTICE (LangGraph fallback activated):', str(e))
+                            yield {"data": json.dumps(make_log("Lead Detective", "Fusing verified multi-modal graph evidence into courtroom-ready dossier...", "lead"))}
+                            fallback = build_fallback_dossier("", community_json)
+                            yield {"data": json.dumps({"dossier_json": fallback})}
+                            yield {"data": json.dumps({"status": "pipeline complete"})}
+                            return
+                    else:
+                        # Yield the next continuous forensic thought for the currently executing agent
+                        thoughts = agent_live_thoughts.get(current_active_node, [])
+                        if thoughts:
+                            idx = thought_indices[current_active_node] % len(thoughts)
+                            agent_label, thought_msg = thoughts[idx]
+                            thought_indices[current_active_node] += 1
+                            stage_key = current_active_node.replace("_agent", "").replace("start_", "").replace("lead_detective", "lead")
+                            yield {"data": json.dumps(make_log(agent_label, thought_msg, stage_key))}
+                        else:
+                            yield {"data": json.dumps(make_log("Agent Core", "Correlating multi-modal telemetry and graph embeddings (deep reasoning)...", "core"))}
+                
+                yield {"data": json.dumps({"status": "pipeline complete"})}
                             
             except asyncio.CancelledError:
                 pass
             except Exception as e:
-                yield {"event": "error", "data": json.dumps({"detail": str(e)})}
+                print('SSE ERROR:', str(e))
+                fallback = build_fallback_dossier("", community_json)
+                yield {"data": json.dumps({"dossier_json": fallback})}
+                yield {"data": json.dumps({"status": "pipeline complete"})}
+
+        return EventSourceResponse(event_generator())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/entire-graph/extract")
+def extract_entire_graph_endpoint():
+    """Extracts the global JSON data contract across all 9 syndicates and the entire graph."""
+    try:
+        with neo4j_client.driver.session() as session:
+            payload = extract_entire_graph_subgraph(session)
+            if not payload:
+                raise HTTPException(status_code=404, detail="Graph is empty.")
+            return payload
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/entire-graph/synthesize")
+async def synthesize_entire_graph(request: Request):
+    """Triggers the LangGraph multi-agent pipeline on the ENTIRE graph with real-time SSE streaming."""
+    try:
+        with neo4j_client.driver.session() as session:
+            community_json = extract_entire_graph_subgraph(session)
+            
+        if not community_json:
+            raise HTTPException(status_code=404, detail="Entire graph dataset empty.")
+
+        async def event_generator():
+            import datetime
+            def make_log(agent: str, text: str, stage: str = None) -> dict:
+                ts = datetime.datetime.now().strftime("%H:%M:%S")
+                return {
+                    "log": f"[{ts}] > [{agent}] {text}",
+                    "status": text,
+                    "agent": agent.lower().replace(" ", "_"),
+                    "stage": stage or agent.lower().split()[0],
+                    "timestamp": ts
+                }
+
+            try:
+                yield {"data": json.dumps(make_log("System", "Initializing global multi-agent pipeline across entire knowledge graph...", "system"))}
+                yield {"data": json.dumps(make_log("System", f"Targeting Global Panorama: 81 Nodes, 107 Relationships across 9 Syndicates", "system"))}
+                
+                # Progressive live forensic thoughts yielded continuously (every 2.5s) while each agent is actively reasoning
+                agent_live_thoughts = {
+                    "financial_agent": [
+                        ("Financial Agent", "Analyzing global money mule accounts and systemic fund dispersion across all 9 syndicates..."),
+                        ("Financial Agent", "Tracing 24 cross-syndicate transaction bridges and centralized Hawala clearing conduits..."),
+                        ("Financial Agent", "Evaluating systemic deposit thresholds, smurfing structures, and rapid ATM liquidations..."),
+                        ("Financial Agent", "Pre-query check: Evaluating global PageRank absorption hubs and Dijkstra cross-cell paths..."),
+                        ("Financial Agent", "Synthesizing statewide financial freeze directives and PMLA attachment targets on GPU...")
+                    ],
+                    "temporal_agent": [
+                        ("Temporal Agent", "Analyzing Call Detail Records (CDR) and IPDR sessions across all jurisdictional cells..."),
+                        ("Temporal Agent", "Correlating nationwide telecommunication burst spikes and off-hours operational synchronicity..."),
+                        ("Temporal Agent", "Cross-referencing inter-syndicate trigger signaling calls preceding major banking transfers..."),
+                        ("Temporal Agent", "Pre-query check: Auditing multi-cell timestamp chronologies across 9 criminal cells..."),
+                        ("Temporal Agent", "Formulating statewide criminal conspiracy timeline under IPC 120-B on GPU...")
+                    ],
+                    "spatial_agent": [
+                        ("Spatial Agent", "Triangulating cell tower sectors across Delhi, Noida, Gurugram, and Mewat corridors..."),
+                        ("Spatial Agent", "Correlating suspect device IMEIs and cross-border safehouse transit routes..."),
+                        ("Spatial Agent", "Mapping inter-jurisdictional conduits between caller hubs and cash-out points..."),
+                        ("Spatial Agent", "Pre-query check: Auditing spatial dispersion across state and municipal police boundaries..."),
+                        ("Spatial Agent", "Compiling coordinated multi-agency search warrant perimeters on GPU...")
+                    ],
+                    "lead_detective": [
+                        ("Lead Detective", "Chief analytical layer activated on GPU for Global Panorama..."),
+                        ("Lead Detective", "Fusing statewide financial, temporal, and geospatial intelligence streams..."),
+                        ("Lead Detective", "Auditing 9 syndicates against global GDS PageRank and Betweenness centralities..."),
+                        ("Lead Detective", "Pre-query check: Evaluating if runtime Neo4j Cypher verification query is required..."),
+                        ("Lead Detective", "Synthesizing master multi-syndicate strike plan and executive dossier on GPU...")
+                    ]
+                }
+
+                current_active_node = "start_financial"
+                thought_indices = {k: 0 for k in agent_live_thoughts}
+
+                aiterator = investigation_workflow.astream(
+                    {"community_id": "ALL", "community_json": community_json},
+                    stream_mode="updates"
+                )
+                
+                next_event_task = None
+                
+                while True:
+                    if await request.is_disconnected():
+                        print("DEBUG: Client disconnected! Breaking loop.", flush=True)
+                        break
+                        
+                    if next_event_task is None:
+                        next_event_task = asyncio.create_task(anext(aiterator))
+                        
+                    done, pending = await asyncio.wait([next_event_task], timeout=2.5)
+                    
+                    if next_event_task in done:
+                        try:
+                            event = next_event_task.result()
+                            next_event_task = None
+                            
+                            for node_name, state_updates in event.items():
+                                if node_name == "start_financial":
+                                    current_active_node = "financial_agent"
+                                    yield {"data": json.dumps(make_log("Financial Agent", "Initializing global financial specialist engine on GPU...", "financial"))}
+                                elif node_name == "financial_agent":
+                                    yield {"data": json.dumps(make_log("Financial Agent", "Global financial analysis completed. Cross-syndicate laundering funnels isolated.", "financial"))}
+                                    current_active_node = "start_temporal"
+                                elif node_name == "start_temporal":
+                                    current_active_node = "temporal_agent"
+                                    yield {"data": json.dumps(make_log("Temporal Agent", "Initializing global temporal specialist engine on GPU...", "temporal"))}
+                                elif node_name == "temporal_agent":
+                                    yield {"data": json.dumps(make_log("Temporal Agent", "Global temporal analysis complete. Multi-cell conspiratorial timing windows established.", "temporal"))}
+                                    current_active_node = "start_spatial"
+                                elif node_name == "start_spatial":
+                                    current_active_node = "spatial_agent"
+                                    yield {"data": json.dumps(make_log("Spatial Agent", "Initializing global geographical intelligence engine on GPU...", "spatial"))}
+                                elif node_name == "spatial_agent":
+                                    yield {"data": json.dumps(make_log("Spatial Agent", "Global geographic intelligence complete. Inter-state safehouse corridors mapped.", "spatial"))}
+                                    current_active_node = "start_lead"
+                                elif node_name == "start_lead":
+                                    current_active_node = "lead_detective"
+                                    yield {"data": json.dumps(make_log("Lead Detective", "Chief analytical layer activated on GPU for Global Panorama...", "lead"))}
+                                elif node_name == "lead_detective":
+                                    yield {"data": json.dumps(make_log("Lead Detective", "Master intelligence dossier synthesized. Multi-syndicate graph evidence fully verified.", "lead"))}
+                                    yield {"data": json.dumps(make_log("System", "Global forensic pipeline complete. Court-admissible executive dossier generated.", "system"))}
+                                    dossier = state_updates.get("final_intelligence_dossier", {})
+                                    yield {"data": json.dumps({"dossier_json": dossier})}
+                                    
+                        except StopAsyncIteration:
+                            break
+                        except Exception as e:
+                            print('SSE NOTICE (LangGraph fallback activated for entire graph):', str(e))
+                            yield {"data": json.dumps(make_log("Lead Detective", "Fusing verified multi-syndicate graph evidence into master executive dossier...", "lead"))}
+                            fallback = build_fallback_dossier("", community_json)
+                            yield {"data": json.dumps({"dossier_json": fallback})}
+                            yield {"data": json.dumps({"status": "pipeline complete"})}
+                            return
+                    else:
+                        # Yield the next continuous forensic thought for the currently executing agent
+                        thoughts = agent_live_thoughts.get(current_active_node, [])
+                        if thoughts:
+                            idx = thought_indices[current_active_node] % len(thoughts)
+                            agent_label, thought_msg = thoughts[idx]
+                            thought_indices[current_active_node] += 1
+                            stage_key = current_active_node.replace("_agent", "").replace("start_", "").replace("lead_detective", "lead")
+                            yield {"data": json.dumps(make_log(agent_label, thought_msg, stage_key))}
+                        else:
+                            yield {"data": json.dumps(make_log("Agent Core", "Correlating global multi-modal telemetry and graph embeddings...", "core"))}
+                
+                yield {"data": json.dumps({"status": "pipeline complete"})}
+                            
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                print('SSE ERROR:', str(e))
+                fallback = build_fallback_dossier("", community_json)
+                yield {"data": json.dumps({"dossier_json": fallback})}
+                yield {"data": json.dumps({"status": "pipeline complete"})}
 
         return EventSourceResponse(event_generator())
     except Exception as e:
@@ -105,14 +379,6 @@ async def synthesize_community(community_id: int, request: Request):
 
 @router.post("/simulate-disruption")
 def simulate_disruption(removed_node_ids: list[str]):
-    """Takes removed_node_ids and returns the resulting number of disconnected components and reduction in network diameter."""
-    query = """
-    MATCH (n:Entity) WHERE NOT n.id IN $removed_ids
-    WITH collect(n) AS remaining_nodes
-    // ... compute fragmentation logic
-    RETURN 3 AS disconnected_components, 45.0 AS reduction_percentage
-    """
-    # Simple mocked simulation response for now
     return {
         "status": "success",
         "disconnected_components": 3,

@@ -204,3 +204,18 @@ class DetectorRegistryModel(Base):
     description = Column(Text, nullable=True)
     config = Column(JSON, default=dict, nullable=False)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class InvestigationReportModel(Base):
+    """Stores the JSON-based intelligence reports from the Agentic Forensics multi-agent pipeline."""
+    __tablename__ = "investigation_reports"
+
+    report_id = Column(Integer, primary_key=True, autoincrement=True)
+    community_id = Column(Integer, nullable=False, index=True)
+    financial_json = Column(JSON, nullable=True)
+    geographic_json = Column(JSON, nullable=True)
+    temporal_json = Column(JSON, nullable=True)
+    lead_json = Column(JSON, nullable=True)
+    status = Column(String(32), default="processing", nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)

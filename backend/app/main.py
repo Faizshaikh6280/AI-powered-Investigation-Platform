@@ -10,7 +10,6 @@ from app.api.anomaly import router as anomaly_router
 from app.api.cases import router as cases_router
 from app.api.investigation import router as investigation_router
 from app.core.database import init_postgres, get_db_context
-from app.core.storage import storage_service
 from app.models.postgres_models import GoldenProfileModel
 
 app = FastAPI(title="Unified Investigative Analytics Platform", version="2.0.0")
@@ -25,12 +24,13 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    # Initialize PostgreSQL tables and MinIO buckets
-    init_postgres()
+    # Initialize PostgreSQL tables (graceful — server starts even if DB is down)
     try:
-        storage_service.ensure_buckets()
+        init_postgres()
     except Exception as e:
-        print(f"[MinIO] Storage init warning: {e}")
+        print(f"[PostgreSQL] DB init warning (non-fatal): {e}")
+    # MinIO bucket init skipped at startup — called on-demand when evidence is uploaded
+    print("[Startup] Backend ready. MinIO/PostgreSQL errors above are non-fatal.")
 
 # Register API Routers
 app.include_router(cases_router, prefix="/api", tags=["Cases & Evidence"])
