@@ -691,10 +691,10 @@ async function cachedFetch<T>(key: string, ttlMs: number, fetcher: () => Promise
 
 export const apiClient = {
   // === GENERIC REQUEST ===
-  async request(endpoint: string, options?: RequestInit): Promise<any> {
+  async request<T = any>(endpoint: string, options?: RequestInit): Promise<T> {
     const url = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`;
     const res = await fetch(url, options);
-    return handleResponse<any>(res);
+    return handleResponse<T>(res);
   },
 
   // === CASES & EVIDENCE ===
@@ -895,6 +895,8 @@ export const apiClient = {
       : `${API_BASE}/api/anomalies/analyze?sync=true`;
     const res = await fetch(url, { method: 'POST' });
     return handleResponse<{ message: string; result: AnomalyRunResult }>(res);
+  },
+
   async getCaseSummary(caseId: string): Promise<any> {
     const res = await fetch(`${API_BASE}/api/anomalies/cases/${encodeURIComponent(caseId)}/summary`);
     return handleResponse<any>(res);
@@ -1451,11 +1453,6 @@ export const apiClient = {
       body: JSON.stringify({ new_pin: newPin }),
     });
     return handleResponse<any>(res);
-  },
-
-  async request<T = any>(endpoint: string, options?: RequestInit): Promise<T> {
-    const res = await fetch(`${API_BASE}${endpoint}`, options);
-    return handleResponse<T>(res);
   }
 };
 
