@@ -1,10 +1,8 @@
 'use client';
-
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
-  ArrowLeft, MapPin, Users, Calendar, Clock, ChevronDown, 
-  Layers, Filter, Download, RefreshCw, Crosshair, Phone, 
-  CreditCard, Smartphone, Check, Sparkles, Activity, Eye, BookOpen, Landmark
+  Map as MapIcon, Users, Landmark, BookOpen, Crosshair, Filter, 
+  Download, Layers, RefreshCw, Activity, ShieldCheck, Sparkles, Navigation 
 } from 'lucide-react';
 
 import { useCase } from '../../context/CaseContext';
@@ -14,26 +12,28 @@ import {
   CommonPlace, SpatialStoryCard, ActivityDensityCell, GeoInvestigationResponse 
 } from '../../services/apiClient';
 
-import { LeafletGeoMap } from './LeafletGeoMap';
 import { GeoDeckGLMap } from './GeoDeckGLMap';
-import { GeoTimelineReel } from './GeoTimelineReel';
-import { GeoEntityDetailsDrawer } from './GeoEntityDetailsDrawer';
+import { GeoPlaybackControls } from './GeoPlaybackControls';
+import { GeoLegend } from './GeoLegend';
 import { GeoFilterPanel } from './GeoFilterPanel';
-import { GeoAreaInvestigationModal } from './GeoAreaInvestigationModal';
 import { GeoCoLocationDrawer } from './GeoCoLocationDrawer';
 import { GeoCommonPlacesPanel } from './GeoCommonPlacesPanel';
 import { GeoSpatialStoryPanel } from './GeoSpatialStoryPanel';
+import { GeoEventDetailDrawer } from './GeoEventDetailDrawer';
+import { GeoAreaInvestigationModal } from './GeoAreaInvestigationModal';
 
 // Entity color palette for visually distinct trajectories
 const ENTITY_COLOR_PALETTE: Array<[number, number, number]> = [
-  [59, 130, 246],  // Blue (Person)
-  [147, 51, 234],  // Purple (Device)
-  [16, 185, 129],  // Emerald (Location)
-  [245, 158, 11],  // Amber (Transaction)
-  [239, 68, 68],   // Crimson (Call)
   [6, 182, 212],   // Cyan
+  [239, 68, 68],   // Crimson
+  [52, 211, 153],  // Emerald
+  [251, 191, 36],  // Amber
+  [168, 85, 247],  // Purple
   [244, 114, 182], // Pink
+  [59, 130, 246],  // Blue
   [249, 115, 22],  // Orange
+  [163, 230, 53],  // Lime
+  [14, 165, 233],  // Sky
 ];
 
 export const GeoWorkspace: React.FC<{ onViewOnGraph?: (entityId: string) => void }> = ({
@@ -45,20 +45,20 @@ export const GeoWorkspace: React.FC<{ onViewOnGraph?: (entityId: string) => void
   const [investigation, setInvestigation] = useState<GeoInvestigationResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Map or Graph mode toggle (top-left switch in reference image)
-  const [viewMode, setViewMode] = useState<'MAP' | 'GRAPH'>('MAP');
-
-  // Active side drawer / modal panels
+  // Active side panel tab: 'NONE' | 'COLOCATIONS' | 'COMMON_PLACES' | 'STORY'
   const [activeSidePanel, setActiveSidePanel] = useState<'NONE' | 'COLOCATIONS' | 'COMMON_PLACES' | 'STORY'>('NONE');
+
+  // Modals & Panels toggle
   const [isAreaModalOpen, setIsAreaModalOpen] = useState(false);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
-  const [isEntityDrawerOpen, setIsEntityDrawerOpen] = useState(true);
+  const [showLegend, setShowLegend] = useState(true);
 
   // Layer Toggles
   const [showWaypoints, setShowWaypoints] = useState(true);
   const [showMovements, setShowMovements] = useState(true);
-  const [showLegend, setShowLegend] = useState(true);
-  const [useDeckGL, setUseDeckGL] = useState(false);
+  const [showTrips, setShowTrips] = useState(true);
+  const [showCoverage, setShowCoverage] = useState(false);
+  const [showHeatmap, setShowHeatmap] = useState(false);
 
   // Playback state
   const [isPlaying, setIsPlaying] = useState(false);
@@ -66,29 +66,27 @@ export const GeoWorkspace: React.FC<{ onViewOnGraph?: (entityId: string) => void
 
   // Selection state
   const [selectedEvent, setSelectedEvent] = useState<GeoCanonicalEvent | null>(null);
-  const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [areaModalCenter, setAreaModalCenter] = useState<[number, number]>([30.7410, 76.7680]);
 
-  // Filters from top sub-header
-  const [selectedEntityFilter, setSelectedEntityFilter] = useState<string>('ALL');
-  const [selectedActivityFilter, setSelectedActivityFilter] = useState<string>('ALL');
-  const [selectedDateFilter, setSelectedDateFilter] = useState<string>('28 Aug 2026');
-  const [selectedTimeFilter, setSelectedTimeFilter] = useState<string>('10:00 AM - 11:00 AM');
+  // Filters
+  const [selectedEntities, setSelectedEntities] = useState<string[]>([]);
+  const [selectedDomains, setSelectedDomains] = useState<string[]>([]);
+  const [minConfidence, setMinConfidence] = useState<number>(0);
 
   const targetCaseId = activeCase?.case_id || 'INV-2026-BLACK-CIRCUIT';
-  const caseReference = activeCase?.case_reference || 'CASE-2026-041';
 
   // Load geo investigation data
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const res = await api.getGeoInvestigation(targetCaseId, {
-        entity_ids: selectedEntityFilter !== 'ALL' ? [selectedEntityFilter] : undefined,
-        domains: selectedActivityFilter !== 'ALL' ? [selectedActivityFilter] : undefined,
+        entity_ids: selectedEntities.length > 0 ? selectedEntities : undefined,
+        domains: selectedDomains.length > 0 ? selectedDomains : undefined,
+        min_confidence: minConfidence > 0 ? minConfidence : undefined,
       });
       setInvestigation(res);
 
-      // Auto calibrate time range
+      // Sync timeline range if available
       if (res.events.length > 0) {
         const timestamps = res.events.map(e => e.timestamp_ms);
         const minT = Math.min(...timestamps);
@@ -97,22 +95,19 @@ export const GeoWorkspace: React.FC<{ onViewOnGraph?: (entityId: string) => void
         if (currentTime < minT || currentTime > maxT) {
           setCurrentTime(minT);
         }
-        if (!selectedEvent) {
-          setSelectedEvent(res.events[0]);
-        }
       }
     } catch (err) {
       console.error("Failed to load geospatial investigation:", err);
     } finally {
       setLoading(false);
     }
-  }, [targetCaseId, selectedEntityFilter, selectedActivityFilter, currentTime, setCurrentTime, setTimeRange, selectedEvent]);
+  }, [targetCaseId, selectedEntities, selectedDomains, minConfidence, currentTime, setCurrentTime, setTimeRange]);
 
   useEffect(() => {
     loadData();
   }, [targetCaseId]);
 
-  // Entity colors mapping
+  // Map entities to stable colors
   const entityColors = useMemo(() => {
     const colors: Record<string, [number, number, number]> = {};
     if (!investigation) return colors;
@@ -124,7 +119,6 @@ export const GeoWorkspace: React.FC<{ onViewOnGraph?: (entityId: string) => void
     return colors;
   }, [investigation]);
 
-  // Unique Entities for Filter
   const availableEntities = useMemo(() => {
     if (!investigation) return [];
     const map = new Map<string, string>();
@@ -133,24 +127,49 @@ export const GeoWorkspace: React.FC<{ onViewOnGraph?: (entityId: string) => void
       const name = e.entity_name || id;
       map.set(id, name);
     });
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+    return Array.from(map.entries()).map(([id, name]) => ({
+      id,
+      name,
+      color: entityColors[name] || [6, 182, 212],
+    }));
+  }, [investigation, entityColors]);
+
+  const availableDomains = useMemo(() => {
+    if (!investigation) return [];
+    return Array.from(new Set(investigation.events.map(e => e.domain)));
   }, [investigation]);
 
-  // Dynamic Metrics for Sub-Header
-  const metrics = useMemo(() => {
-    if (!investigation) {
-      return { locations: 4, entities: 5, events: 12 };
-    }
-    const uniqueLocations = new Set(investigation.events.map(e => e.location_name || `${e.latitude.toFixed(2)},${e.longitude.toFixed(2)}`));
-    const uniqueEnts = new Set(investigation.events.map(e => e.entity_name || e.entity_id));
-    return {
-      locations: Math.max(uniqueLocations.size, 4),
-      entities: Math.max(uniqueEnts.size, 5),
-      events: Math.max(investigation.events.length, 12)
-    };
+  // Format waypoints for TripsLayer
+  const tripsWaypoints = useMemo(() => {
+    if (!investigation) return [];
+    const groups: Record<string, { cluster_id: string; entity_name: string; path: number[][]; timestamps: number[] }> = {};
+
+    investigation.events.forEach(ev => {
+      const key = ev.entity_name || ev.entity_id || 'UNKNOWN';
+      if (!groups[key]) {
+        groups[key] = {
+          cluster_id: key,
+          entity_name: key,
+          path: [],
+          timestamps: [],
+        };
+      }
+      groups[key].path.push([ev.longitude, ev.latitude]);
+      groups[key].timestamps.push(ev.timestamp_ms);
+    });
+
+    return Object.values(groups).map(g => {
+      const sorted = g.timestamps.map((t, i) => ({ t, p: g.path[i] })).sort((a, b) => a.t - b.t);
+      return {
+        cluster_id: g.cluster_id,
+        entity_name: g.entity_name,
+        path: sorted.map(s => s.p),
+        timestamps: sorted.map(s => s.t),
+      };
+    });
   }, [investigation]);
 
-  // Handle export
+  // Export handlers
   const handleExportGeoJSON = async () => {
     try {
       const data = await api.exportGeoDossier(targetCaseId, 'geojson');
@@ -171,316 +190,326 @@ export const GeoWorkspace: React.FC<{ onViewOnGraph?: (entityId: string) => void
     setIsAreaModalOpen(true);
   };
 
+  const resetFilters = () => {
+    setSelectedEntities([]);
+    setSelectedDomains([]);
+    setMinConfidence(0);
+  };
+
   return (
-    <div className="flex flex-col h-full w-full bg-slate-50 dark:bg-slate-950 overflow-hidden relative">
-      
-      {/* ========================================================================= */}
-      {/* 1. TOP SUB-HEADER / BREADCRUMB BAR (Matching Reference Image)            */}
-      {/* ========================================================================= */}
-      <header className="h-20 bg-white dark:bg-slate-900 border-b border-slate-200/80 dark:border-slate-800 px-6 flex items-center justify-between z-20 shadow-sm shrink-0">
-        
-        {/* Left: Back to Case + Title + Subtitle + Case Pill + Metrics */}
-        <div className="flex items-center gap-6">
-          <div className="flex flex-col">
-            <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer mb-1">
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Back to Case</span>
+    <div className="flex flex-col h-full w-full bg-background overflow-hidden relative">
+      {/* Top Navigation Bar */}
+      <header className="h-14 border-b border-border/80 bg-[#080d1a]/95 px-4 flex items-center justify-between z-20 backdrop-blur-md">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 font-bold text-foreground tracking-tight">
+            <div className="p-1.5 rounded-lg bg-primary/20 text-primary border border-primary/40">
+              <MapIcon className="w-4 h-4" />
             </div>
-            
-            <div className="flex items-center gap-3">
-              <h1 className="text-base font-extrabold tracking-tight text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                <span>GEOSPATIAL ANALYSIS</span>
-                <span className="px-2 py-0.5 rounded-full text-xs font-bold font-mono bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
-                  {caseReference}
-                </span>
-              </h1>
-            </div>
-
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-              Location Intelligence & Entity Movement Analysis
-            </p>
+            <span className="text-sm">Geospatial Intelligence Engine</span>
           </div>
 
-          {/* Vertical Separator */}
-          <div className="h-9 w-px bg-slate-200 dark:bg-slate-800 hidden lg:block" />
+          <div className="h-4 w-px bg-border mx-1" />
 
-          {/* Quick Metrics Chips */}
-          <div className="hidden lg:flex items-center gap-4 text-xs font-medium text-slate-600 dark:text-slate-300">
-            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800/60 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700/60">
-              <MapPin className="w-3.5 h-3.5 text-blue-600" />
-              <span className="font-bold">{metrics.locations}</span>
-              <span className="text-slate-500 text-[11px]">Locations</span>
-            </div>
-
-            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800/60 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700/60">
-              <Users className="w-3.5 h-3.5 text-purple-600" />
-              <span className="font-bold">{metrics.entities}</span>
-              <span className="text-slate-500 text-[11px]">Entities</span>
-            </div>
-
-            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800/60 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700/60">
-              <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-              <span className="font-bold">{metrics.events}</span>
-              <span className="text-slate-500 text-[11px]">Spatial Events</span>
-            </div>
-          </div>
+          {/* Case Selector Dropdown */}
+          <select
+            value={targetCaseId}
+            onChange={e => setActiveCaseId(e.target.value)}
+            className="bg-secondary/70 border border-border/70 rounded-md px-2.5 py-1 text-xs text-foreground font-medium focus:outline-none focus:border-primary"
+          >
+            {cases.map(c => (
+              <option key={c.case_id} value={c.case_id}>
+                {c.title || c.case_id}
+              </option>
+            ))}
+            {cases.length === 0 && (
+              <option value="INV-2026-BLACK-CIRCUIT">Operation Black Circuit</option>
+            )}
+          </select>
         </div>
 
-        {/* Right: Interactive Filters (Entity, Activity, Date, Time) */}
-        <div className="flex items-center gap-3">
-          {/* Entity Filter Dropdown */}
-          <div className="relative">
-            <select
-              value={selectedEntityFilter}
-              onChange={(e) => setSelectedEntityFilter(e.target.value)}
-              className="appearance-none bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2 pr-8 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700/50 cursor-pointer outline-none focus:ring-2 focus:ring-blue-500/20"
-            >
-              <option value="ALL">All Entities</option>
-              {availableEntities.map(ent => (
-                <option key={ent.id} value={ent.id}>{ent.name}</option>
-              ))}
-            </select>
-            <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-          </div>
+        {/* Investigative Module Switchers */}
+        <div className="flex items-center gap-1.5 bg-secondary/40 p-1 rounded-xl border border-border/60 text-xs">
+          <button
+            onClick={() => setActiveSidePanel(activeSidePanel === 'COLOCATIONS' ? 'NONE' : 'COLOCATIONS')}
+            className={`px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5 transition-all ${
+              activeSidePanel === 'COLOCATIONS'
+                ? 'bg-primary text-primary-foreground font-bold shadow-md'
+                : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Co-Locations</span>
+            {investigation && (
+              <span className="px-1.5 py-0.2 rounded-full bg-black/30 text-[10px] font-mono">
+                {investigation.co_locations.length}
+              </span>
+            )}
+          </button>
 
-          {/* Activity Filter Dropdown */}
-          <div className="relative">
-            <select
-              value={selectedActivityFilter}
-              onChange={(e) => setSelectedActivityFilter(e.target.value)}
-              className="appearance-none bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2 pr-8 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700/50 cursor-pointer outline-none focus:ring-2 focus:ring-blue-500/20"
-            >
-              <option value="ALL">All Activities</option>
-              <option value="TELECOM">Calls & SMS</option>
-              <option value="LOCATION">Movement & GPS</option>
-              <option value="FINANCIAL">Transactions</option>
-              <option value="SOCIAL">Social Media</option>
-            </select>
-            <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-          </div>
+          <button
+            onClick={() => setActiveSidePanel(activeSidePanel === 'COMMON_PLACES' ? 'NONE' : 'COMMON_PLACES')}
+            className={`px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5 transition-all ${
+              activeSidePanel === 'COMMON_PLACES'
+                ? 'bg-primary text-primary-foreground font-bold shadow-md'
+                : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
+            }`}
+          >
+            <Landmark className="w-3.5 h-3.5" />
+            <span>Common Places</span>
+            {investigation && (
+              <span className="px-1.5 py-0.2 rounded-full bg-black/30 text-[10px] font-mono">
+                {investigation.common_places.length}
+              </span>
+            )}
+          </button>
 
-          {/* Date Selector */}
-          <div className="relative hidden sm:block">
-            <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
-              <Calendar className="w-3.5 h-3.5 text-slate-400" />
-              <span>{selectedDateFilter}</span>
-            </div>
-          </div>
+          <button
+            onClick={() => setActiveSidePanel(activeSidePanel === 'STORY' ? 'NONE' : 'STORY')}
+            className={`px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5 transition-all ${
+              activeSidePanel === 'STORY'
+                ? 'bg-primary text-primary-foreground font-bold shadow-md'
+                : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
+            }`}
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            <span>Spatial Story</span>
+          </button>
 
-          {/* Time Window Selector */}
-          <div className="relative hidden md:block">
-            <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
-              <Clock className="w-3.5 h-3.5 text-slate-400" />
-              <span>{selectedTimeFilter}</span>
-            </div>
-          </div>
+          <button
+            onClick={() => setIsAreaModalOpen(true)}
+            className="px-3 py-1.5 rounded-lg font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 flex items-center gap-1.5 transition-all"
+          >
+            <Crosshair className="w-3.5 h-3.5" />
+            <span>Geofence Area Scan</span>
+          </button>
+        </div>
 
-          {/* Refresh & Forensic Tools Menu */}
+        {/* Action Buttons */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowFilterPanel(!showFilterPanel)}
+            className={`p-2 rounded-lg border text-xs flex items-center gap-1.5 transition-colors ${
+              showFilterPanel
+                ? 'bg-primary/20 border-primary text-primary'
+                : 'bg-secondary/50 border-border text-muted-foreground hover:text-foreground'
+            }`}
+            title="Toggle Filter Sidebar"
+          >
+            <Filter className="w-4 h-4" />
+          </button>
+
+          <button
+            onClick={() => setShowLegend(!showLegend)}
+            className={`p-2 rounded-lg border text-xs flex items-center gap-1.5 transition-colors ${
+              showLegend
+                ? 'bg-primary/20 border-primary text-primary'
+                : 'bg-secondary/50 border-border text-muted-foreground hover:text-foreground'
+            }`}
+            title="Toggle Map Layers & Legend"
+          >
+            <Layers className="w-4 h-4" />
+          </button>
+
+          <button
+            onClick={handleExportGeoJSON}
+            className="p-2 rounded-lg bg-secondary/50 border border-border text-muted-foreground hover:text-foreground transition-colors"
+            title="Export GeoJSON Dossier"
+          >
+            <Download className="w-4 h-4" />
+          </button>
+
           <button
             onClick={loadData}
-            className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 transition-colors"
-            title="Reload Intelligence Feed"
+            className="p-2 rounded-lg bg-secondary/50 border border-border text-muted-foreground hover:text-foreground transition-colors"
+            title="Refresh Geospatial Data"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
         </div>
       </header>
 
-      {/* ========================================================================= */}
-      {/* 2. MAIN WORKSPACE CANVAS + OVERLAYS + ENTITY DRAWER                       */}
-      {/* ========================================================================= */}
+      {/* Main Investigation Workspace */}
       <div className="flex-1 flex overflow-hidden relative">
-        
-        {/* Central Map Canvas */}
-        <div className="flex-1 h-full w-full relative overflow-hidden">
-          
-          {/* Top-Left: Map / Graph Mode Toggle Switch */}
-          <div className="absolute top-5 left-5 z-20">
-            <div className="flex items-center bg-white/95 dark:bg-slate-900/95 backdrop-blur-md p-1 rounded-xl shadow-lg border border-slate-200/80 dark:border-slate-800">
-              <button
-                onClick={() => setViewMode('MAP')}
-                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                  viewMode === 'MAP'
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
-                }`}
-              >
-                Map
-              </button>
-              <button
-                onClick={() => {
-                  setViewMode('GRAPH');
-                  if (onViewOnGraph && selectedEntityId) {
-                    onViewOnGraph(selectedEntityId);
-                  }
-                }}
-                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                  viewMode === 'GRAPH'
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
-                }`}
-              >
-                Graph
-              </button>
-            </div>
-          </div>
+        {/* Left Side Sliding Drawers */}
+        {activeSidePanel === 'COLOCATIONS' && investigation && (
+          <GeoCoLocationDrawer
+            coLocations={investigation.co_locations}
+            onSelectCoLocation={co => {
+              setSelectedEvent({
+                geo_event_id: `COLOC-MID-${co.co_location_id}`,
+                event_id: co.supporting_events[0] || '',
+                case_id: targetCaseId,
+                latitude: co.latitude,
+                longitude: co.longitude,
+                timestamp: co.start_time,
+                timestamp_ms: new Date(co.start_time).getTime(),
+                raw_timestamp: co.start_time,
+                location_type: 'GPS' as any,
+                accuracy_radius_meters: co.distance_between_meters || 100,
+                location_confidence: 0.9,
+                location_name: co.location_name,
+                domain: 'CORRELATION',
+                event_type: 'CO_LOCATION',
+                raw_evidence_id: co.co_location_id,
+                anomaly_score: co.correlation_score,
+                anomaly_reasons: [`Co-location observed between ${co.entity_names.join(' & ')}`],
+                epistemic_status: 'OBSERVED',
+                metadata: { co_location: co },
+              });
+            }}
+            onViewOnGraph={onViewOnGraph}
+          />
+        )}
 
-          {/* Top-Right: Floating Map Legend (Matching Reference Image) */}
+        {activeSidePanel === 'COMMON_PLACES' && investigation && (
+          <GeoCommonPlacesPanel
+            commonPlaces={investigation.common_places}
+            onSelectPlace={place => {
+              setSelectedEvent({
+                geo_event_id: `HUB-${place.place_id}`,
+                event_id: place.place_id,
+                case_id: targetCaseId,
+                latitude: place.latitude,
+                longitude: place.longitude,
+                timestamp: place.time_spans[0] || new Date().toISOString(),
+                timestamp_ms: new Date(place.time_spans[0] || Date.now()).getTime(),
+                raw_timestamp: place.time_spans[0] || '',
+                location_type: place.location_type,
+                accuracy_radius_meters: place.radius_meters,
+                location_confidence: 0.95,
+                location_name: place.place_name,
+                domain: place.dominant_domain,
+                event_type: 'SPATIAL_HUB',
+                raw_evidence_id: place.place_id,
+                anomaly_score: 0,
+                anomaly_reasons: [],
+                epistemic_status: 'DERIVED',
+                metadata: { place },
+              });
+            }}
+          />
+        )}
+
+        {activeSidePanel === 'STORY' && investigation && (
+          <GeoSpatialStoryPanel
+            storyCards={investigation.story_cards}
+            onSelectCard={card => {
+              setSelectedEvent({
+                geo_event_id: card.card_id,
+                event_id: card.card_id,
+                case_id: targetCaseId,
+                entity_id: card.entity_id,
+                entity_name: card.entity_name,
+                latitude: card.coordinates[0],
+                longitude: card.coordinates[1],
+                timestamp: card.timestamp,
+                timestamp_ms: new Date(card.timestamp).getTime(),
+                raw_timestamp: card.timestamp,
+                location_type: 'GPS' as any,
+                accuracy_radius_meters: 50,
+                location_confidence: 0.95,
+                location_name: card.location_name,
+                domain: 'LOCATION',
+                event_type: 'STORY_MILESTONE',
+                raw_evidence_id: card.evidence_refs[0] || 'STORY',
+                anomaly_score: card.anomalies.length > 0 ? 80 : 0,
+                anomaly_reasons: card.anomalies,
+                epistemic_status: 'OBSERVED',
+                metadata: { story: card },
+              });
+            }}
+          />
+        )}
+
+        {/* Center: Interactive DeckGL Map */}
+        <div className="flex-1 h-full w-full relative">
+          <GeoDeckGLMap
+            events={investigation?.events || []}
+            movements={investigation?.movements || []}
+            tripsWaypoints={tripsWaypoints}
+            densityGrid={investigation?.density_grid || []}
+            selectedEvent={selectedEvent}
+            onSelectEvent={ev => setSelectedEvent(ev)}
+            onMapClickCoordinates={handleMapClick}
+            currentTime={currentTime}
+            timeRange={timeRange}
+            entityColors={entityColors}
+            showWaypoints={showWaypoints}
+            showMovements={showMovements}
+            showTrips={showTrips}
+            showCoverage={showCoverage}
+            showHeatmap={showHeatmap}
+            initialCenter={investigation?.summary_metrics?.center}
+          />
+
+          {/* Floating Filter Panel (Top Left) */}
+          {showFilterPanel && (
+            <div className="absolute top-4 left-4 z-30 max-w-sm">
+              <GeoFilterPanel
+                availableEntities={availableEntities}
+                selectedEntities={selectedEntities}
+                setSelectedEntities={setSelectedEntities}
+                availableDomains={availableDomains}
+                selectedDomains={selectedDomains}
+                setSelectedDomains={setSelectedDomains}
+                minConfidence={minConfidence}
+                setMinConfidence={setMinConfidence}
+                onResetFilters={resetFilters}
+              />
+            </div>
+          )}
+
+          {/* Floating Map Legend & Layer Visibility (Bottom Left) */}
           {showLegend && (
-            <div className="absolute top-5 right-5 z-20">
-              <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-4 py-3 rounded-2xl shadow-xl border border-slate-200/80 dark:border-slate-800 text-xs space-y-2">
-                <div className="flex items-center gap-2 text-slate-700 dark:text-slate-200 font-medium">
-                  <div className="w-2.5 h-2.5 rounded-full bg-blue-600" />
-                  <span>Person</span>
-                </div>
-                <div className="flex items-center gap-2 text-slate-700 dark:text-slate-200 font-medium">
-                  <div className="w-2.5 h-2.5 rounded-full bg-purple-600" />
-                  <span>Device</span>
-                </div>
-                <div className="flex items-center gap-2 text-slate-700 dark:text-slate-200 font-medium">
-                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                  <span>Location</span>
-                </div>
-                <div className="flex items-center gap-2 text-slate-700 dark:text-slate-200 font-medium">
-                  <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                  <span>Transaction</span>
-                </div>
-                <div className="flex items-center gap-2 text-slate-700 dark:text-slate-200 font-medium">
-                  <div className="w-2.5 h-2.5 rounded-full bg-red-500" />
-                  <span>Call</span>
-                </div>
-                <div className="pt-1 border-t border-slate-200 dark:border-slate-800 space-y-1.5 text-[11px] text-slate-500">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono font-bold text-blue-500">⇢</span>
-                    <span>Movement</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono font-bold text-pink-500">---</span>
-                    <span>Connection</span>
-                  </div>
-                </div>
-              </div>
+            <div className="absolute bottom-4 left-4 z-30">
+              <GeoLegend
+                showWaypoints={showWaypoints}
+                setShowWaypoints={setShowWaypoints}
+                showMovements={showMovements}
+                setShowMovements={setShowMovements}
+                showTrips={showTrips}
+                setShowTrips={setShowTrips}
+                showCoverage={showCoverage}
+                setShowCoverage={setShowCoverage}
+                showHeatmap={showHeatmap}
+                setShowHeatmap={setShowHeatmap}
+              />
             </div>
           )}
 
-          {/* Interactive Geospatial Map Component */}
-          {useDeckGL ? (
-            <GeoDeckGLMap
-              events={investigation?.events || []}
-              movements={investigation?.movements || []}
-              tripsWaypoints={[]}
-              densityGrid={investigation?.density_grid || []}
-              selectedEvent={selectedEvent}
-              onSelectEvent={(ev) => {
-                setSelectedEvent(ev);
-                setIsEntityDrawerOpen(true);
-              }}
-              onMapClickCoordinates={handleMapClick}
+          {/* Floating Playback Scrubber (Bottom Center) */}
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 w-full max-w-xl px-4">
+            <GeoPlaybackControls
               currentTime={currentTime}
+              setCurrentTime={setCurrentTime}
               timeRange={timeRange}
-              entityColors={entityColors}
-              showWaypoints={showWaypoints}
-              showMovements={showMovements}
-              showTrips={false}
-              showCoverage={true}
-              showHeatmap={false}
-              initialCenter={investigation?.summary_metrics?.center}
+              isPlaying={isPlaying}
+              setIsPlaying={setIsPlaying}
+              playbackSpeed={playbackSpeed}
+              setPlaybackSpeed={setPlaybackSpeed}
             />
-          ) : (
-            <LeafletGeoMap
-              events={investigation?.events || []}
-              movements={investigation?.movements || []}
-              selectedEvent={selectedEvent}
-              onSelectEvent={(ev) => {
-                setSelectedEvent(ev);
-                setIsEntityDrawerOpen(true);
-              }}
-              selectedEntityId={selectedEntityId}
-              onSelectEntity={(entId) => {
-                setSelectedEntityId(entId);
-                setIsEntityDrawerOpen(true);
-              }}
-              onMapClickCoordinates={handleMapClick}
-              currentTime={currentTime}
-              timeRange={timeRange}
-              entityColors={entityColors}
-              showWaypoints={showWaypoints}
-              showMovements={showMovements}
-              showCoverage={true}
-              initialCenter={investigation?.summary_metrics?.center}
-            />
-          )}
-
-          {/* Investigative Modals Trigger Toolbar (Top Center) */}
-          <div className="absolute top-5 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md px-2 py-1 rounded-xl shadow-md border border-slate-200 dark:border-slate-800 text-xs">
-            <button
-              onClick={() => setActiveSidePanel(activeSidePanel === 'COLOCATIONS' ? 'NONE' : 'COLOCATIONS')}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                activeSidePanel === 'COLOCATIONS' 
-                  ? 'bg-blue-600 text-white font-bold' 
-                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100'
-              }`}
-            >
-              Co-Locations ({investigation?.co_locations?.length || 0})
-            </button>
-
-            <button
-              onClick={() => setActiveSidePanel(activeSidePanel === 'COMMON_PLACES' ? 'NONE' : 'COMMON_PLACES')}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                activeSidePanel === 'COMMON_PLACES' 
-                  ? 'bg-blue-600 text-white font-bold' 
-                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100'
-              }`}
-            >
-              Common Places
-            </button>
-
-            <button
-              onClick={() => setIsAreaModalOpen(true)}
-              className="px-3 py-1.5 rounded-lg text-emerald-600 font-semibold bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 transition-all flex items-center gap-1.5"
-            >
-              <Crosshair className="w-3.5 h-3.5" />
-              <span>Geofence Scan</span>
-            </button>
           </div>
+
+          {/* Loading Indicator */}
+          {loading && (
+            <div className="absolute top-4 right-4 z-30 bg-[#0b101b]/90 border border-primary/40 px-3 py-1.5 rounded-lg flex items-center gap-2 text-xs font-mono text-primary shadow-xl backdrop-blur-md">
+              <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              <span>Synthesizing Geo Intelligence...</span>
+            </div>
+          )}
         </div>
 
-        {/* Right Side: ENTITY DETAILS Drawer (Collapsible) */}
-        {isEntityDrawerOpen && (
-          <GeoEntityDetailsDrawer
-            entityId={selectedEntityId}
-            selectedEvent={selectedEvent}
-            events={investigation?.events || []}
-            onClose={() => setIsEntityDrawerOpen(false)}
+        {/* Right Event Detail Drawer */}
+        {selectedEvent && (
+          <GeoEventDetailDrawer
+            event={selectedEvent}
+            onClose={() => setSelectedEvent(null)}
             onViewOnGraph={onViewOnGraph}
-            onSelectEvent={(ev) => {
-              setSelectedEvent(ev);
-              setCurrentTime(ev.timestamp_ms);
-            }}
           />
         )}
       </div>
 
-      {/* ========================================================================= */}
-      {/* 3. BOTTOM SYNCHRONIZED TIMELINE & EVENT REEL (Matching Reference UI)     */}
-      {/* ========================================================================= */}
-      <GeoTimelineReel
-        events={investigation?.events || []}
-        currentTime={currentTime}
-        setCurrentTime={setCurrentTime}
-        timeRange={timeRange}
-        selectedEvent={selectedEvent}
-        onSelectEvent={(ev) => {
-          setSelectedEvent(ev);
-          setIsEntityDrawerOpen(true);
-        }}
-        isPlaying={isPlaying}
-        setIsPlaying={setIsPlaying}
-        playbackSpeed={playbackSpeed}
-        setPlaybackSpeed={setPlaybackSpeed}
-      />
-
-      {/* Geofence Area Modal */}
+      {/* Geofence Area Investigation Modal */}
       {isAreaModalOpen && (
         <GeoAreaInvestigationModal
           caseId={targetCaseId}
@@ -508,12 +537,9 @@ export const GeoWorkspace: React.FC<{ onViewOnGraph?: (entityId: string) => void
               epistemic_status: 'OBSERVED',
               metadata: {},
             });
-            setIsEntityDrawerOpen(true);
           }}
         />
       )}
     </div>
   );
 };
-
-export default GeoWorkspace;

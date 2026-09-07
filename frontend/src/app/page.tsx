@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Search, Bell, HelpCircle, User, Activity, FolderOpen, Database, 
   Users, Share2, Clock, Map, AlertTriangle, FileText, Smartphone, 
   Globe, BarChart3, ShieldCheck, Settings, LogOut, ChevronRight,
   Sun, Moon, Menu, Command, X, Cpu, Plus, Layers, Crosshair, Camera,
-  Shield, LogIn
+  Shield, LogIn, Check, ChevronDown
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { cn } from '../utils/cn';
@@ -78,11 +78,29 @@ function InvestigationWorkspace() {
   
   const [selectedAnomaly, setSelectedAnomaly] = useState<any>(null);
   const [focusAnomalyEntityId, setFocusAnomalyEntityId] = useState<string | null>(null);
+  const [focusCommunityId, setFocusCommunityId] = useState<number | string | null>(null);
+  const [focusEntityIds, setFocusEntityIds] = useState<string[] | null>(null);
+
+  // Case Selector Dropdown State
+  const [isCaseDropdownOpen, setIsCaseDropdownOpen] = useState(false);
+  const [caseSearchQuery, setCaseSearchQuery] = useState('');
+  const caseDropdownRef = useRef<HTMLDivElement>(null);
 
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => setMounted(true), []);
+
+  // Close case dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (caseDropdownRef.current && !caseDropdownRef.current.contains(e.target as Node)) {
+        setIsCaseDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Handle case_id redirect from NFC authentication
   useEffect(() => {
@@ -136,8 +154,8 @@ function InvestigationWorkspace() {
         <div className="h-14 flex items-center justify-center px-4 border-b border-border">
           <div className="flex items-center gap-2 text-primary font-bold text-xl tracking-tight overflow-hidden whitespace-nowrap w-full">
             <ShieldCheck className="w-6 h-6 flex-shrink-0 text-primary" />
-            <div className={cn("transition-opacity duration-300 font-mono tracking-widest", isSidebarExpanded ? "opacity-100" : "opacity-0 w-0")}>
-              TRACE <span className="text-[10px] font-sans font-bold bg-primary/10 text-primary px-1.5 py-0.5 rounded border border-primary/20">V2</span>
+            <div className={cn("transition-opacity duration-300 font-bold tracking-tight text-foreground", isSidebarExpanded ? "opacity-100" : "opacity-0 w-0")}>
+              TRACE <span className="text-[10px] font-bold bg-primary/10 text-primary px-1.5 py-0.5 rounded-full border border-primary/20">V2</span>
             </div>
           </div>
         </div>
@@ -169,40 +187,112 @@ function InvestigationWorkspace() {
         
         {/* Top Header */}
         <header className="h-14 flex-shrink-0 flex items-center justify-between px-4 border-b border-border bg-background z-20">
-          {/* Dynamic Active Case Switcher */}
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <div className="flex items-center gap-2 bg-secondary/80 border border-border px-2.5 py-1 rounded-lg">
-              <FolderOpen className="w-4 h-4 text-primary flex-shrink-0" />
-              {cases.length > 0 ? (
-                <select
-                  value={activeCase?.case_id || ''}
-                  onChange={(e) => setActiveCaseId(e.target.value)}
-                  className="bg-transparent border-none outline-none text-xs font-bold text-foreground cursor-pointer max-w-[220px] truncate"
-                >
-                  {cases.map((c) => (
-                    <option key={c.case_id} value={c.case_id} className="bg-card text-foreground">
-                      {c.case_reference}: {c.title}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <span className="text-xs font-bold text-muted-foreground">No Cases</span>
-              )}
-              {can('case.create') && (
-                <button
-                  onClick={() => setIsCreateModalOpen(true)}
-                  className="p-0.5 text-muted-foreground hover:text-primary transition-colors ml-1"
-                  title="Create New Case Dossier"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-            
-            {activeCase?.status && (
-              <span className="hidden sm:inline-block text-[10px] font-bold uppercase tracking-wider text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                {activeCase.status}
-              </span>
+          {/* Modern Glassmorphic Active Case Switcher */}
+          <div className="relative" ref={caseDropdownRef}>
+            <button
+              onClick={() => setIsCaseDropdownOpen(!isCaseDropdownOpen)}
+              className="flex items-center gap-2.5 bg-secondary/80 hover:bg-secondary border border-border px-3 py-1.5 rounded-xl transition-all shadow-sm text-left group"
+              title="Click to switch investigation case"
+            >
+              <div className="p-1 rounded-lg bg-primary/10 text-primary">
+                <FolderOpen className="w-4 h-4 flex-shrink-0" />
+              </div>
+              <div className="flex flex-col">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-foreground max-w-[180px] sm:max-w-[240px] truncate">
+                    {activeCase ? activeCase.title : "Select Case Dossier"}
+                  </span>
+                  {activeCase?.status && (
+                    <span className="text-[9px] font-bold text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                      {activeCase.status}
+                    </span>
+                  )}
+                </div>
+                {activeCase && (
+                  <span className="text-[10px] text-muted-foreground font-medium">
+                    {activeCase.case_reference}
+                  </span>
+                )}
+              </div>
+              <ChevronDown className={cn("w-3.5 h-3.5 text-muted-foreground ml-1 transition-transform duration-200", isCaseDropdownOpen && "rotate-180")} />
+            </button>
+
+            {isCaseDropdownOpen && (
+              <div className="absolute left-0 top-full mt-2 w-80 bg-card/95 backdrop-blur-xl border border-border rounded-2xl shadow-2xl z-50 p-2 animate-in fade-in zoom-in-95 duration-150">
+                <div className="px-2 py-1.5 border-b border-border/80 mb-2 flex items-center gap-2">
+                  <Search className="w-3.5 h-3.5 text-muted-foreground" />
+                  <input
+                    type="text"
+                    placeholder="Filter cases..."
+                    value={caseSearchQuery}
+                    onChange={(e) => setCaseSearchQuery(e.target.value)}
+                    className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none"
+                    autoFocus
+                  />
+                  {caseSearchQuery && (
+                    <button onClick={() => setCaseSearchQuery('')} className="text-muted-foreground hover:text-foreground">
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="max-h-60 overflow-y-auto space-y-1">
+                  {cases.filter(c => 
+                    !caseSearchQuery || 
+                    c.title.toLowerCase().includes(caseSearchQuery.toLowerCase()) || 
+                    c.case_reference.toLowerCase().includes(caseSearchQuery.toLowerCase())
+                  ).length === 0 ? (
+                    <div className="p-4 text-center text-xs text-muted-foreground">
+                      No matching cases found
+                    </div>
+                  ) : (
+                    cases
+                      .filter(c => 
+                        !caseSearchQuery || 
+                        c.title.toLowerCase().includes(caseSearchQuery.toLowerCase()) || 
+                        c.case_reference.toLowerCase().includes(caseSearchQuery.toLowerCase())
+                      )
+                      .map(c => {
+                        const isSelected = activeCase?.case_id === c.case_id;
+                        return (
+                          <button
+                            key={c.case_id}
+                            onClick={() => {
+                              setActiveCaseId(c.case_id);
+                              setIsCaseDropdownOpen(false);
+                            }}
+                            className={cn(
+                              "w-full text-left p-2.5 rounded-xl text-xs transition-all flex items-start justify-between gap-2",
+                              isSelected
+                                ? "bg-primary/10 border border-primary/30 text-primary font-semibold"
+                                : "hover:bg-secondary text-foreground"
+                            )}
+                          >
+                            <div className="truncate">
+                              <div className="font-bold truncate">{c.title}</div>
+                              <div className="text-[10px] text-muted-foreground mt-0.5">{c.case_reference}</div>
+                            </div>
+                            {isSelected && <Check className="w-4 h-4 text-primary shrink-0 mt-0.5" />}
+                          </button>
+                        );
+                      })
+                  )}
+                </div>
+
+                {can('case.create') && (
+                  <div className="pt-2 mt-2 border-t border-border">
+                    <button
+                      onClick={() => {
+                        setIsCaseDropdownOpen(false);
+                        setIsCreateModalOpen(true);
+                      }}
+                      className="w-full py-2 px-3 rounded-xl bg-secondary/80 hover:bg-secondary text-primary font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Create New Case Dossier
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
@@ -351,7 +441,16 @@ function InvestigationWorkspace() {
           )}
 
           {activeTab === 'relationship-graph' && (
-            <GraphTopologyViewer focusEntityId={focusAnomalyEntityId} />
+            <GraphTopologyViewer 
+              focusEntityId={focusAnomalyEntityId} 
+              focusEntityIds={focusEntityIds}
+              focusCommunityId={focusCommunityId}
+              onClearFocus={() => {
+                setFocusAnomalyEntityId(null);
+                setFocusEntityIds(null);
+                setFocusCommunityId(null);
+              }}
+            />
           )}
 
           {activeTab === 'timeline' && (
@@ -398,7 +497,15 @@ function InvestigationWorkspace() {
           )}
 
           {activeTab === 'agentic' && (
-            <InvestigationDashboard activeCaseId={activeCase?.case_id || ""} />
+            <InvestigationDashboard 
+              activeCaseId={activeCase?.case_id || ""} 
+              onNavigateToGraph={(entityIds, communityId) => {
+                setFocusEntityIds(entityIds || null);
+                setFocusCommunityId(communityId !== undefined ? communityId : null);
+                setFocusAnomalyEntityId(null);
+                setActiveTab('relationship-graph');
+              }}
+            />
           )}
         </main>
       </div>
