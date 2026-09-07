@@ -12,12 +12,15 @@ def get_gds_client() -> GraphDataScience:
         auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD)
     )
 
-def project_and_compute_association_strength(gds: GraphDataScience, graph_name: str = "criminal_network"):
+def project_and_compute_association_strength(gds: Any = None, graph_name: str = "criminal_network", case_id: Any = None):
     """
     Project weighted monopartite graph via Cypher Projection.
     Links entities across CDR, Bank Transfers, Shared IPDR Sessions, and Social Links.
-    Computes Association Strength C_ij / (S_i * S_j)
+    Computes Association Strength C_ij / (S_i * S_j) scoped to case_id if provided.
     """
+    if gds is None:
+        gds = get_gds_client()
+        
     with _projection_lock:
         try:
             if gds.graph.exists(graph_name)["exists"]:
@@ -28,17 +31,23 @@ def project_and_compute_association_strength(gds: GraphDataScience, graph_name: 
         except Exception:
             pass
         
-    node_query = """
-    MATCH (e) WHERE NOT e:Anomaly
+    case_filter_node = f"AND (e.case_id = '{case_id}' OR '{case_id}' IN coalesce(e.case_ids, []))" if case_id else ""
+    case_filter_e1 = f"AND (e1.case_id = '{case_id}' OR '{case_id}' IN coalesce(e1.case_ids, []))" if case_id else ""
+    case_filter_e2 = f"AND (e2.case_id = '{case_id}' OR '{case_id}' IN coalesce(e2.case_ids, []))" if case_id else ""
+    case_filter_n1 = f"AND (n1.case_id = '{case_id}' OR '{case_id}' IN coalesce(n1.case_ids, []))" if case_id else ""
+    case_filter_n2 = f"AND (n2.case_id = '{case_id}' OR '{case_id}' IN coalesce(n2.case_ids, []))" if case_id else ""
+
+    node_query = f"""
+    MATCH (e) WHERE NOT e:Anomaly {case_filter_node}
     RETURN id(e) AS id, labels(e) AS labels
     """
     
-    relationship_query = """
+    relationship_query = f"""
     MATCH (e1)-[r]-(e2)
-    WHERE NOT e1:Anomaly AND NOT e2:Anomaly AND id(e1) < id(e2)
+    WHERE NOT e1:Anomaly AND NOT e2:Anomaly AND id(e1) < id(e2) {case_filter_e1} {case_filter_e2}
     WITH e1, e2, count(r) AS C_ij
-    MATCH (e1)-[r1]-(n1) WHERE NOT n1:Anomaly WITH e1, e2, C_ij, count(r1) AS S_i
-    MATCH (e2)-[r2]-(n2) WHERE NOT n2:Anomaly WITH e1, e2, C_ij, S_i, count(r2) AS S_j
+    MATCH (e1)-[r1]-(n1) WHERE NOT n1:Anomaly {case_filter_n1} WITH e1, e2, C_ij, count(r1) AS S_i
+    MATCH (e2)-[r2]-(n2) WHERE NOT n2:Anomaly {case_filter_n2} WITH e1, e2, C_ij, S_i, count(r2) AS S_j
     WITH e1, e2, (toFloat(C_ij) / (toFloat(S_i) * toFloat(S_j))) AS association_strength
     RETURN id(e1) AS source, id(e2) AS target, 'CO_OFFENDING' AS type, association_strength AS weight
     """
@@ -115,13 +124,14 @@ def run_gds_analytics(gds: GraphDataScience, G) -> Dict[str, Any]:
 
     return {"status": "All 5 GDS Analytics executed successfully", "details": results}
 
-def generate_logical_community_metadata(session, cid: int) -> Dict[str, Any]:
+def generate_logical_community_metadata(session, cid: int, case_id: Any = None) -> Dict[str, Any]:
     """
     Dynamically generates a professional, logical name and operational profile
     for a community based on its kingpins, brokers, locations, and crime signatures.
     """
     q = """
     MATCH (e) WHERE e.communityId = $cid AND NOT e:Anomaly
+      AND ($case_id IS NULL OR e.case_id = $case_id OR $case_id IN coalesce(e.case_ids, []))
     WITH collect(e) as nodes
     RETURN [n in nodes WHERE 'Person' IN labels(n)] as people,
            [n in nodes WHERE 'BankAccount' IN labels(n)] as accounts,
@@ -130,15 +140,15 @@ def generate_logical_community_metadata(session, cid: int) -> Dict[str, Any]:
            [n in nodes WHERE 'IPAddress' IN labels(n)] as ips,
            size(nodes) as total_size
     """
-    rec = session.run(q, cid=cid).single()
-    if not rec:
+    rec = session.run(q, cid=cid, case_id=case_id).single()
+    if not rec or rec["total_size"] == 0:
         return {
             "communityId": cid,
             "name": f"Syndicate Cluster #{cid}",
-            "kingpin": "Unknown",
-            "broker": "Unknown",
-            "crime_profile": "Unknown",
-            "location": "NCR",
+            "kingpin": "Primary Suspect",
+            "broker": "Cell Broker",
+            "crime_profile": "Operational Nexus",
+            "location": "Jurisdiction Zone",
             "size": 0,
             "top_members": []
         }
@@ -161,18 +171,17 @@ def generate_logical_community_metadata(session, cid: int) -> Dict[str, Any]:
     locations = []
     
     if sorted_people:
-        kingpin = sorted_people[0].get("name", "Unknown")
+        kingpin = sorted_people[0].get("name") or sorted_people[0].get("primary_name") or "Primary Suspect"
         for p in sorted_people:
             addrs = p.get("addresses", [])
             for a in addrs:
-                for city in ["Noida", "Ghaziabad", "Delhi", "Gurugram", "Okhla", "Khora", "Faridabad", "Mumbai"]:
-                    if city.lower() in a.lower() and city not in locations:
-                        locations.append(city)
+                if a and isinstance(a, str):
+                    locations.append(a.strip())
         if len(sorted_people) > 1:
             broker_cand = sorted(sorted_people[1:], key=lambda p: p.get("betweenness", 0.0), reverse=True)
-            broker = broker_cand[0].get("name", "Unknown")
+            broker = broker_cand[0].get("name") or broker_cand[0].get("primary_name") or "Key Associate"
         elif phones:
-            broker = phones[0].get("number", "Unknown Phone Gateway")
+            broker = phones[0].get("number", "Phone Gateway")
     else:
         if accounts:
             kingpin = accounts[0].get("holder") or accounts[0].get("account_number") or "Account Nexus"
@@ -188,7 +197,7 @@ def generate_logical_community_metadata(session, cid: int) -> Dict[str, Any]:
         crime_tags.append("Cyber Intrusion Cell")
         
     crime_tag = " & ".join(crime_tags[:2]) if crime_tags else "Operational Nexus"
-    loc_str = locations[0] if locations else "NCR"
+    loc_str = locations[0] if locations else "Investigation Zone"
     
     if kingpin != "Unknown" and "Syndicate" not in kingpin and "Nexus" not in kingpin:
         cluster_name = f"{kingpin} Syndicate ({loc_str} {crime_tag})"
@@ -200,25 +209,26 @@ def generate_logical_community_metadata(session, cid: int) -> Dict[str, Any]:
     return {
         "communityId": cid,
         "name": cluster_name,
-        "kingpin": kingpin,
-        "broker": broker,
+        "kingpin": kingpin if kingpin != "Unknown" else f"Cluster #{cid} Suspect",
+        "broker": broker if broker != "Unknown" else "Operational Broker",
         "size": size,
         "crime_profile": crime_tag,
         "location": loc_str,
         "top_members": [p.get("name") for p in sorted_people if p.get("name")]
     }
 
-def extract_community_subgraph(session, community_id: int) -> Dict[str, Any]:
+def extract_community_subgraph(session, community_id: int, case_id: Any = None) -> Dict[str, Any]:
     """
     Extracts a strict JSON data contract for a targeted syndicate subgraph,
     including the results of all 5 GDS algorithms (Louvain, PageRank, Betweenness, FastRP/KNN, Dijkstra).
     """
-    meta = generate_logical_community_metadata(session, community_id)
+    meta = generate_logical_community_metadata(session, community_id, case_id=case_id)
     
     # 1. Base community extraction query
     query = """
     MATCH (e)
     WHERE e.communityId = $cid AND NOT e:Anomaly
+      AND ($case_id IS NULL OR e.case_id = $case_id OR $case_id IN coalesce(e.case_ids, []))
     WITH collect(e) AS members, count(e) AS total_members
     
     UNWIND members AS m
@@ -246,6 +256,7 @@ def extract_community_subgraph(session, community_id: int) -> Dict[str, Any]:
          
     MATCH (e1)-[r]->(e2)
     WHERE e1.communityId = $cid AND e2.communityId = $cid AND NOT e1:Anomaly AND NOT e2:Anomaly
+      AND ($case_id IS NULL OR (e1.case_id = $case_id AND e2.case_id = $case_id))
     WITH total_members, cdr_count, fund_count, ip_count, social_count, offenders, type(r) AS rel_type, r, e1, e2
     
     WITH total_members, cdr_count, fund_count, ip_count, social_count, offenders,
@@ -292,7 +303,7 @@ def extract_community_subgraph(session, community_id: int) -> Dict[str, Any]:
         digital_ipdr: [x IN digital_ipdr WHERE x IS NOT NULL]
     } AS payload
     """
-    base_res = session.run(query, cid=community_id).single()
+    base_res = session.run(query, cid=community_id, case_id=case_id).single()
     payload = base_res["payload"] if base_res else {"group_id": community_id, "offenders": []}
     
     # 2. FastRP / KNN Similar Behavior (Exposing Hidden Shadows / Silent Partners)
@@ -317,7 +328,7 @@ def extract_community_subgraph(session, community_id: int) -> Dict[str, Any]:
             "similarity": r["similarity"],
             "significance": f"High behavioral similarity ({round(r['similarity'] * 100)}%) indicating silent partner or shadow asset."
         }
-        for r in session.run(knn_q, cid=community_id)
+        for r in session.run(knn_q, cid=community_id, case_id=case_id)
     ]
     
     # 3. Shortest Path (Dijkstra Money Trail)
@@ -337,7 +348,7 @@ def extract_community_subgraph(session, community_id: int) -> Dict[str, Any]:
             "length": r["length"],
             "description": f"Multi-hop money trail ({r['length']} transfers) tracing funds across intermediary accounts."
         }
-        for r in session.run(sp_q, cid=community_id)
+        for r in session.run(sp_q, cid=community_id, case_id=case_id)
     ]
     
     # 4. GDS Louvain Syndicate Summary
@@ -379,7 +390,7 @@ def extract_community_subgraph(session, community_id: int) -> Dict[str, Any]:
     
     return payload
 
-def extract_entire_graph_subgraph(session) -> Dict[str, Any]:
+def extract_entire_graph_subgraph(session, case_id: Any = None) -> Dict[str, Any]:
     """
     Extracts a rich, global JSON data contract for the entire knowledge graph,
     enabling macro-level multi-syndicate forensic analysis across all 5 GDS algorithms.
@@ -388,16 +399,18 @@ def extract_entire_graph_subgraph(session) -> Dict[str, Any]:
     cid_q = """
     MATCH (e)
     WHERE e.communityId IS NOT NULL AND NOT e:Anomaly
+      AND ($case_id IS NULL OR e.case_id = $case_id OR $case_id IN coalesce(e.case_ids, []))
     RETURN e.communityId AS cid, count(e) AS size
     ORDER BY size DESC LIMIT 15
     """
-    raw_cids = [r["cid"] for r in session.run(cid_q)]
-    syndicates = [generate_logical_community_metadata(session, cid) for cid in raw_cids]
+    raw_cids = [r["cid"] for r in session.run(cid_q, case_id=case_id)]
+    syndicates = [generate_logical_community_metadata(session, cid, case_id=case_id) for cid in raw_cids]
     
     # 2. Extract all entities with GDS metrics
     node_q = """
     MATCH (m)
     WHERE NOT m:Anomaly
+      AND ($case_id IS NULL OR m.case_id = $case_id OR $case_id IN coalesce(m.case_ids, []))
     RETURN coalesce(m.id, m.number, m.account_number, m.address, m.imei_number, elementId(m)) AS entity_id,
            coalesce(m.name, m.primary_name, m.account_number, m.number, m.address, m.handle, m.imei_number, m.id, elementId(m)) AS display_name,
            round(coalesce(m.pagerank, 0.0) * 1000) / 1000 AS pagerank,
@@ -410,7 +423,7 @@ def extract_entire_graph_subgraph(session) -> Dict[str, Any]:
            CASE WHEN 'SocialAccount' IN labels(m) THEN [m.handle] ELSE [] END AS social_handles
     ORDER BY pagerank DESC
     """
-    all_nodes = [dict(r) for r in session.run(node_q)]
+    all_nodes = [dict(r) for r in session.run(node_q, case_id=case_id)]
     
     # 3. Inter-syndicate relationships (cross-cluster links)
     cross_rel_q = """
@@ -427,7 +440,7 @@ def extract_entire_graph_subgraph(session) -> Dict[str, Any]:
            coalesce(r.duration, 0) AS duration
     LIMIT 25
     """
-    inter_syndicate_bridges = [dict(r) for r in session.run(cross_rel_q)]
+    inter_syndicate_bridges = [dict(r) for r in session.run(cross_rel_q, case_id=case_id)]
     
     # 4. Global financial transactions
     tx_q = """
@@ -444,7 +457,7 @@ def extract_entire_graph_subgraph(session) -> Dict[str, Any]:
            coalesce(r.remarks, '') AS remarks
     ORDER BY r.amount DESC LIMIT 20
     """
-    financial_transactions = [dict(r) for r in session.run(tx_q)]
+    financial_transactions = [dict(r) for r in session.run(tx_q, case_id=case_id)]
     
     # 5. Global communications CDR
     cdr_q = """
@@ -459,7 +472,7 @@ def extract_entire_graph_subgraph(session) -> Dict[str, Any]:
            coalesce(r.duration, 0) AS duration_sec
     ORDER BY r.duration DESC LIMIT 20
     """
-    communications_cdr = [dict(r) for r in session.run(cdr_q)]
+    communications_cdr = [dict(r) for r in session.run(cdr_q, case_id=case_id)]
     
     # 6. Global digital IPDR
     ip_q = """
@@ -473,7 +486,7 @@ def extract_entire_graph_subgraph(session) -> Dict[str, Any]:
            coalesce(r.vpn_or_proxy, false) AS vpn_or_proxy
     LIMIT 20
     """
-    digital_ipdr = [dict(r) for r in session.run(ip_q)]
+    digital_ipdr = [dict(r) for r in session.run(ip_q, case_id=case_id)]
     
     # 7. Global FastRP & KNN Similar Behavior (Cross-Syndicate Shadows)
     knn_q = """
@@ -500,7 +513,7 @@ def extract_entire_graph_subgraph(session) -> Dict[str, Any]:
             "similarity": r["similarity"],
             "significance": f"High behavioral similarity ({round(r['similarity'] * 100)}%) across clusters {r['comm_1']} and {r['comm_2']} indicating shared operational cell or silent partner."
         }
-        for r in session.run(knn_q)
+        for r in session.run(knn_q, case_id=case_id)
     ]
     
     # 8. Cross-Syndicate Shortest Paths
@@ -520,22 +533,25 @@ def extract_entire_graph_subgraph(session) -> Dict[str, Any]:
             "length": r["length"],
             "description": f"Cross-syndicate money trail ({r['length']} transfers) bridging distinct criminal cells."
         }
-        for r in session.run(sp_q)
+        for r in session.run(sp_q, case_id=case_id)
     ]
     
     # Sort top actors
     ranked_pr = sorted(all_nodes, key=lambda x: x.get("pagerank", 0.0), reverse=True)
     ranked_bw = sorted(all_nodes, key=lambda x: x.get("betweenness", 0.0), reverse=True)
     
+    kingpin_name = ranked_pr[0]["display_name"] if ranked_pr and ranked_pr[0].get("display_name") else "Primary Person of Interest"
+    broker_name = ranked_bw[0]["display_name"] if ranked_bw and ranked_bw[0].get("display_name") else (ranked_pr[1]["display_name"] if len(ranked_pr) > 1 and ranked_pr[1].get("display_name") else "Key Coordinator")
+    macro_name = f"Case Graph Panorama ({case_id})" if case_id else "Global Investigation Panorama"
     macro_meta = {
         "communityId": "ALL",
-        "name": "Global Cybercrime Syndicate Panorama (Multi-Cell Network)",
-        "kingpin": ranked_pr[0]["display_name"] if ranked_pr else "Vikramaditya Singh",
-        "broker": ranked_bw[0]["display_name"] if ranked_bw else "Pooja Devi",
+        "name": macro_name,
+        "kingpin": kingpin_name,
+        "broker": broker_name,
         "size": len(all_nodes),
-        "crime_profile": "Transnational Cyber-Financial Syndicate & Coordinated Extortion Grid",
-        "location": "National Capital Region (NCR) & Inter-State Corridors",
-        "top_members": [o["display_name"] for o in ranked_pr[:5]]
+        "crime_profile": "Multi-Modal Forensic Evidence Network",
+        "location": "Active Investigation Corridor",
+        "top_members": [o["display_name"] for o in ranked_pr[:5] if o.get("display_name")]
     }
     
     return {

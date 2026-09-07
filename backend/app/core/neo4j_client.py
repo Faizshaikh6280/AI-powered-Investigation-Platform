@@ -3,10 +3,20 @@ from app.core.config import settings
 
 class Neo4jClient:
     def __init__(self):
-        self.driver = None
+        self._driver = None
         self.is_connected = False
         self._last_failed_time = 0
         self._last_verified_time = 0
+
+    @property
+    def driver(self):
+        if self._driver is None:
+            self.ensure_connected()
+        return self._driver
+
+    @driver.setter
+    def driver(self, val):
+        self._driver = val
 
     def ensure_connected(self) -> bool:
         import time
@@ -16,21 +26,21 @@ class Neo4jClient:
             return False
 
         # If recently verified as connected, fast return true
-        if self.is_connected and self.driver and (now - self._last_verified_time) < 15:
+        if self.is_connected and self._driver and (now - self._last_verified_time) < 15:
             return True
 
-        if self.driver:
+        if self._driver:
             try:
-                self.driver.verify_connectivity()
+                self._driver.verify_connectivity()
                 self.is_connected = True
                 self._last_verified_time = now
                 return True
             except Exception:
                 try:
-                    self.driver.close()
+                    self._driver.close()
                 except Exception:
                     pass
-                self.driver = None
+                self._driver = None
                 self.is_connected = False
 
         # Candidate URIs: 127.0.0.1 and settings.NEO4J_URI for instant loopback connection

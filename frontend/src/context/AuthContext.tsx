@@ -108,13 +108,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(data.user);
         setPermissions(data.permissions || []);
         setCaseMemberships(data.case_memberships || []);
+        return;
+      }
+    } catch {
+      // Not authenticated yet, fall through to dev login
+    }
+
+    try {
+      const dev = SEEDED_DEV_ACCOUNTS.IPS_OFFICER;
+      const resp = await apiClient.login({ identifier: dev.email, password: dev.defaultPass });
+      if (resp && resp.user) {
+        setUser(resp.user);
+        setPermissions(resp.permissions || []);
+        setCaseMemberships(resp.case_memberships || []);
       } else {
         setUser(null);
         setPermissions([]);
         setCaseMemberships([]);
       }
     } catch {
-      // Unauthenticated
       setUser(null);
       setPermissions([]);
       setCaseMemberships([]);

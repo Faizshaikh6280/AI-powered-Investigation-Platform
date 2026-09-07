@@ -4,6 +4,9 @@
 @tailwind components;
 @tailwind utilities;
 
+@import 'leaflet/dist/leaflet.css';
+
+
 @layer base {
   :root {
     --background: #FAFAFA;
@@ -136,5 +139,55 @@
   .badge.interpretation {
     @apply bg-indigo-500/20 text-indigo-400 border border-indigo-500/30;
   }
+}
+
+/* Leaflet Custom Marker & Animation Styles */
+.leaflet-div-icon {
+  background: transparent !important;
+  border: none !important;
+}
+
+@keyframes radar-pulse {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.8;
+  }
+  50% {
+    opacity: 0.4;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+.radar-ring {
+  position: absolute;
+  border-radius: 9999px;
+  border: 1.5px solid rgba(16, 185, 129, 0.6);
+  background-color: rgba(16, 185, 129, 0.12);
+  animation: radar-pulse 2.4s cubic-bezier(0.25, 1, 0.5, 1) infinite;
+  pointer-events: none;
+}
+
+.radar-ring-2 {
+  position: absolute;
+  border-radius: 9999px;
+  border: 1.5px solid rgba(16, 185, 129, 0.4);
+  background-color: rgba(16, 185, 129, 0.08);
+  animation: radar-pulse 2.4s cubic-bezier(0.25, 1, 0.5, 1) infinite;
+  animation-delay: 1.2s;
+  pointer-events: none;
+}
+
+@keyframes dash-flow {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+
+.animated-dash-path {
+  stroke-dasharray: 6, 6;
+  animation: dash-flow 1.5s linear infinite;
 }
 

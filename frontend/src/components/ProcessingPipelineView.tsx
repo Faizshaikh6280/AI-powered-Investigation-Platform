@@ -25,6 +25,7 @@ export default function ProcessingPipelineView({ onNavigateToTab }: ProcessingPi
     3: 'IDLE',
     4: 'IDLE',
     5: 'IDLE',
+    6: 'IDLE',
   });
 
   const addLog = (msg: string) => {
@@ -105,6 +106,23 @@ export default function ProcessingPipelineView({ onNavigateToTab }: ProcessingPi
         const res = await apiClient.runAnomalyAnalysis(activeCase?.case_id);
         const summary = res.result?.summary;
         addLog(`Multi-Engine Complete in ${summary?.duration_seconds || 0}s! Found ${summary?.total_findings || 0} unified findings (${summary?.critical_count || 0} Critical).`);
+      }
+    },
+    {
+      index: 6,
+      title: 'Graph Analytics & Syndicate Detection',
+      desc: 'Executes 5 Graph Data Science algorithms (Louvain Modularity, PageRank, Betweenness, FastRP Embeddings, and Shortest Path) to isolate crime syndicates.',
+      icon: Network,
+      actionName: 'Run GDS',
+      runAction: async () => {
+        addLog('Running Graph Data Science & Community Detection algorithms...');
+        const res = await apiClient.request(`/api/v1/investigation/run-algorithms?case_id=${encodeURIComponent(activeCase?.case_id || '')}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ case_id: activeCase?.case_id })
+        });
+        const commCount = res.communities?.length || 0;
+        addLog(`Graph Analytics Complete! Detected ${commCount} crime syndicate(s) for case.`);
       }
     }
   ];

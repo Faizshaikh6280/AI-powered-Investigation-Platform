@@ -79,6 +79,7 @@ def create_case(
         unit_id=current_user.unit_id
     )
     db.add(new_case)
+    db.flush()
 
     # Automatically assign the creator as case OWNER
     creator_membership = CaseMemberModel(

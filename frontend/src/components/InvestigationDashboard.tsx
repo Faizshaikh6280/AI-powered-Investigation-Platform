@@ -41,8 +41,13 @@ export function InvestigationDashboard({ activeCaseId }: Props) {
   }>({ status: 'idle', messages: [], dossier: null });
 
   useEffect(() => {
+    if (!activeCaseId) return;
     setGdsStatus('running');
-    apiClient.request('/api/v1/investigation/run-algorithms', { method: 'POST' })
+    apiClient.request(`/api/v1/investigation/run-algorithms?case_id=${encodeURIComponent(activeCaseId)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ case_id: activeCaseId })
+    })
       .then(res => {
         setCommunities(res.communities || []);
         setGdsStatus('done');
@@ -55,7 +60,7 @@ export function InvestigationDashboard({ activeCaseId }: Props) {
     return () => {
       eventSourceRef.current?.close();
     };
-  }, []);
+  }, [activeCaseId]);
 
   // Auto-scroll terminal
   useEffect(() => {
@@ -86,8 +91,8 @@ export function InvestigationDashboard({ activeCaseId }: Props) {
       : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000');
 
     const sseUrl = selectedCommunity === 'all'
-      ? `${apiBase}/api/v1/investigation/entire-graph/synthesize`
-      : `${apiBase}/api/v1/investigation/community/${selectedCommunity}/synthesize`;
+      ? `${apiBase}/api/v1/investigation/entire-graph/synthesize?case_id=${encodeURIComponent(activeCaseId || '')}`
+      : `${apiBase}/api/v1/investigation/community/${selectedCommunity}/synthesize?case_id=${encodeURIComponent(activeCaseId || '')}`;
 
     const eventSource = new EventSource(sseUrl);
     eventSourceRef.current = eventSource;
@@ -271,64 +276,101 @@ export function InvestigationDashboard({ activeCaseId }: Props) {
             {gdsStatus === 'done' && <span className="text-xs font-bold text-emerald-500 bg-emerald-500/10 px-3 py-1 rounded-full">&#10003; Data Ready</span>}
             {gdsStatus === 'error' && <span className="text-xs font-bold text-red-500 bg-red-500/10 px-3 py-1 rounded-full">GDS Error</span>}
           </div>
-          <div className="flex flex-col sm:flex-row gap-4">
-            <select 
-              className="flex-1 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-600 rounded-xl p-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-medium shadow-sm"
-              value={selectedCommunity || ''}
-              onChange={(e) => {
-                const val = e.target.value;
-                setSelectedCommunity(val === 'all' ? 'all' : Number(val));
-              }}
-            >
-              <option value="" disabled className="text-slate-400 bg-white dark:bg-slate-800">-- Select a Target Syndicate Network --</option>
-              <option value="all" className="font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-slate-800">
-                🌐 ENTIRE GRAPH PANORAMA &mdash; All 9 Syndicates (Global Macro Forensics)
-              </option>
-              {communities.map(c => (
-                <option key={c.communityId} value={c.communityId} className="text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-800">
-                  {c.name || `Syndicate Cluster #${c.communityId}`} &mdash; {c.size} Entities
-                </option>
-              ))}
-            </select>
-            <button 
-              onClick={runSynthesis}
-              disabled={!selectedCommunity || dossierState.status === 'running' || gdsStatus !== 'done'}
-              className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-40 text-white font-bold py-3 px-6 rounded-xl flex items-center gap-2 shadow-lg transition-all shrink-0"
-            >
-              {dossierState.status === 'running' ? <Activity className="w-5 h-5 animate-spin" /> : <Cpu className="w-5 h-5" />}
-              {selectedCommunity === 'all' ? 'Execute Entire Graph Pipeline' : 'Execute AI Pipeline'}
-            </button>
-          </div>
-
-          {selectedCommunity === 'all' && (
-            <div className="mt-4 p-4 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-500/30 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-              <div>
-                <span className="text-indigo-600 dark:text-indigo-400 font-bold uppercase tracking-wider block mb-0.5">Apex Network Command</span>
-                <span className="text-slate-900 dark:text-slate-100 font-black text-sm flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-red-500 inline-block"></span>
-                  Vikramaditya Singh &bull; Suraj Bhan
-                </span>
-              </div>
-              <div>
-                <span className="text-indigo-600 dark:text-indigo-400 font-bold uppercase tracking-wider block mb-0.5">Cross-Syndicate Bridges</span>
-                <span className="text-slate-900 dark:text-slate-100 font-black text-sm flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-amber-500 inline-block"></span>
-                  24 Inter-Cell Conduits (Hawala / Calls)
-                </span>
-              </div>
-              <div>
-                <span className="text-indigo-600 dark:text-indigo-400 font-bold uppercase tracking-wider block mb-0.5">Macro Modus Operandi</span>
-                <span className="text-indigo-700 dark:text-indigo-300 font-bold text-sm truncate block">
-                  Transnational Extortion & Money Mule Grid
-                </span>
-              </div>
-              <div>
-                <span className="text-indigo-600 dark:text-indigo-400 font-bold uppercase tracking-wider block mb-0.5">Whole-Graph Scope</span>
-                <span className="text-slate-900 dark:text-slate-100 font-bold text-sm">
-                  81 Nodes &bull; 9 Syndicates &bull; NCR / Inter-State
-                </span>
-              </div>
+          {communities.length === 0 ? (
+            <div className="p-6 text-center border border-dashed border-slate-300 dark:border-slate-700 rounded-xl bg-slate-50/50 dark:bg-slate-800/30">
+              <Network className="w-10 h-10 text-slate-400 mx-auto mb-2 opacity-60" />
+              <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200">No Graph Communities Detected for Case {activeCaseId}</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto mt-1 mb-4">
+                Evidence files uploaded for this case have not been processed into graph clusters yet. Please upload files in Evidence Intake, execute the Processing Pipeline tab (or click below to refresh graph analytics).
+              </p>
+              <button
+                onClick={() => {
+                  setGdsStatus('running');
+                  apiClient.request(`/api/v1/investigation/run-algorithms?case_id=${encodeURIComponent(activeCaseId)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ case_id: activeCaseId })
+                  })
+                    .then(res => {
+                      setCommunities(res.communities || []);
+                      setGdsStatus('done');
+                    })
+                    .catch(() => setGdsStatus('error'));
+                }}
+                className="text-xs font-bold px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg shadow transition"
+              >
+                Compute & Refresh Graph Analytics
+              </button>
             </div>
+          ) : (
+            <>
+              <div className="flex flex-col sm:flex-row gap-4">
+                <select 
+                  className="flex-1 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-600 rounded-xl p-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-medium shadow-sm"
+                  value={selectedCommunity || ''}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSelectedCommunity(val === 'all' ? 'all' : Number(val));
+                  }}
+                >
+                  <option value="" disabled className="text-slate-400 bg-white dark:bg-slate-800">-- Select a Target Syndicate Network --</option>
+                  <option value="all" className="font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-slate-800">
+                    🌐 ENTIRE CASE GRAPH PANORAMA &mdash; All {communities.length} Detected Syndicates ({communities.reduce((acc, c) => acc + (c.size || 0), 0)} Total Entities)
+                  </option>
+                  {communities.map(c => (
+                    <option key={c.communityId} value={c.communityId} className="text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-800">
+                      {c.name || `Syndicate Cluster #${c.communityId}`} &mdash; {c.size} Entities
+                    </option>
+                  ))}
+                </select>
+                <button 
+                  onClick={runSynthesis}
+                  disabled={!selectedCommunity || dossierState.status === 'running' || gdsStatus !== 'done'}
+                  className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-40 text-white font-bold py-3 px-6 rounded-xl flex items-center gap-2 shadow-lg transition-all shrink-0"
+                >
+                  {dossierState.status === 'running' ? <Activity className="w-5 h-5 animate-spin" /> : <Cpu className="w-5 h-5" />}
+                  {selectedCommunity === 'all' ? 'Execute Entire Graph Pipeline' : 'Execute AI Pipeline'}
+                </button>
+              </div>
+
+              {selectedCommunity === 'all' && (() => {
+                const totalEntities = communities.reduce((acc, c) => acc + (c.size || 0), 0);
+                const topKingpin = communities[0]?.kingpin || "Primary POI";
+                const topBroker = communities[0]?.broker || (communities[1]?.kingpin || "Operational Broker");
+                const crimeSummary = communities.map(c => c.crime_profile).filter(Boolean).slice(0, 2).join(' & ') || "Forensic Investigation Grid";
+                const locSummary = communities.map(c => c.location).filter(Boolean).slice(0, 2).join(' / ') || "Case Operations";
+                return (
+                  <div className="mt-4 p-4 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-500/30 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+                    <div>
+                      <span className="text-indigo-600 dark:text-indigo-400 font-bold uppercase tracking-wider block mb-0.5">Apex Network Command</span>
+                      <span className="text-slate-900 dark:text-slate-100 font-black text-sm flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-red-500 inline-block"></span>
+                        {topKingpin}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-indigo-600 dark:text-indigo-400 font-bold uppercase tracking-wider block mb-0.5">Cross-Cell Broker</span>
+                      <span className="text-slate-900 dark:text-slate-100 font-black text-sm flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-amber-500 inline-block"></span>
+                        {topBroker}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-indigo-600 dark:text-indigo-400 font-bold uppercase tracking-wider block mb-0.5">Macro Modus Operandi</span>
+                      <span className="text-indigo-700 dark:text-indigo-300 font-bold text-sm truncate block" title={crimeSummary}>
+                        {crimeSummary}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-indigo-600 dark:text-indigo-400 font-bold uppercase tracking-wider block mb-0.5">Case Scope</span>
+                      <span className="text-slate-900 dark:text-slate-100 font-bold text-sm">
+                        {totalEntities} Nodes &bull; {communities.length} Syndicates &bull; {locSummary}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
+            </>
           )}
 
           {selectedCommunity && selectedCommunity !== 'all' && (() => {

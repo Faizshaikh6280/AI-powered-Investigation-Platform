@@ -45,26 +45,70 @@ def project_graph(current_user: UserModel = Depends(require_permission(Permissio
         return {"status": "success", "message": f"Graph projection completed (mode: {str(e)})"}
 
 @router.post("/run-algorithms")
-def run_algorithms(current_user: Optional[UserModel] = Depends(get_current_user)):
-    """Executes all 5 GDS algorithms and returns enriched communities with logical names, kingpins, and brokers."""
+def run_algorithms(
+    case_id: Optional[str] = None,
+    payload: Optional[dict] = None,
+    current_user: Optional[UserModel] = Depends(get_current_user)
+):
+    """Executes all 5 GDS algorithms and returns enriched communities with logical names, kingpins, and brokers scoped to case."""
+    target_case_id = (payload.get("case_id") if payload and isinstance(payload, dict) else None) or case_id
+    
+    if target_case_id:
+        with neo4j_client.driver.session() as session:
+            chk = session.run(
+                "MATCH (n) WHERE n.case_id = $cid OR $cid IN coalesce(n.case_ids, []) RETURN count(n) AS cnt",
+                {"cid": target_case_id}
+            ).single()
+            cnt = chk["cnt"] if chk else 0
+            if cnt == 0:
+                try:
+                    from app.services.graph_sync import sync_mongo_to_neo4j
+                    sync_mongo_to_neo4j(case_id=target_case_id)
+                    chk2 = session.run(
+                        "MATCH (n) WHERE n.case_id = $cid OR $cid IN coalesce(n.case_ids, []) RETURN count(n) AS cnt",
+                        {"cid": target_case_id}
+                    ).single()
+                    cnt = chk2["cnt"] if chk2 else 0
+                except Exception:
+                    pass
+
+            if cnt == 0:
+                return {
+                    "status": "success",
+                    "communities": [],
+                    "message": f"No graph entities found for case {target_case_id}. Please upload evidence and execute the processing pipeline."
+                }
+
     try:
         gds = get_gds_client()
-        if not gds.graph.exists("criminal_network")["exists"]:
-            project_and_compute_association_strength(gds, "criminal_network")
-            
-        G = gds.graph.get("criminal_network")
-        res = run_gds_analytics(gds, G)
+        graph_name = f"criminal_network_{target_case_id}" if target_case_id else "criminal_network"
+        res = {"status": "skipped"}
+        try:
+            if not gds.graph.exists(graph_name)["exists"]:
+                project_and_compute_association_strength(gds, graph_name, case_id=target_case_id)
+            G = gds.graph.get(graph_name)
+            res = run_gds_analytics(gds, G)
+        except Exception as gds_err:
+            res = {"status": "fallback", "message": str(gds_err)}
+            with neo4j_client.driver.session() as session:
+                session.run("""
+                    MATCH (e) WHERE NOT e:Anomaly AND ($cid IS NULL OR e.case_id = $cid OR $cid IN coalesce(e.case_ids, []))
+                    SET e.communityId = coalesce(e.communityId, 1),
+                        e.pagerank = coalesce(e.pagerank, 1.0),
+                        e.betweenness = coalesce(e.betweenness, 0.0)
+                """, {"cid": target_case_id})
         
         query = """
         MATCH (e)
         WHERE e.communityId IS NOT NULL AND NOT e:Anomaly
+          AND ($cid IS NULL OR e.case_id = $cid OR $cid IN coalesce(e.case_ids, []))
         RETURN e.communityId AS communityId, count(e) AS size
         ORDER BY size DESC LIMIT 10
         """
         with neo4j_client.driver.session() as session:
-            result = session.run(query)
+            result = session.run(query, {"cid": target_case_id})
             raw_cids = [record["communityId"] for record in result]
-            communities = [generate_logical_community_metadata(session, cid) for cid in raw_cids]
+            communities = [generate_logical_community_metadata(session, cid, case_id=target_case_id) for cid in raw_cids]
             
         return {"status": "success", "communities": communities, "analytics_status": res}
     except Exception as e:
@@ -73,12 +117,13 @@ def run_algorithms(current_user: Optional[UserModel] = Depends(get_current_user)
 @router.get("/community/{community_id}/extract")
 def extract_community(
     community_id: int,
+    case_id: Optional[str] = None,
     current_user: Optional[UserModel] = Depends(get_current_user)
 ):
     """Extracts the structured JSON data contract for a given community."""
     try:
         with neo4j_client.driver.session() as session:
-            payload = extract_community_subgraph(session, community_id)
+            payload = extract_community_subgraph(session, community_id, case_id=case_id)
             if not payload:
                 raise HTTPException(status_code=404, detail="Community not found or empty.")
             return payload
@@ -91,12 +136,13 @@ def extract_community(
 async def synthesize_community(
     community_id: int,
     request: Request,
+    case_id: Optional[str] = None,
     current_user: Optional[UserModel] = Depends(get_current_user)
 ):
     """Triggers the LangGraph multi-agent pipeline with Server-Sent Events (SSE) streaming progress updates to the UI."""
     try:
         with neo4j_client.driver.session() as session:
-            community_json = extract_community_subgraph(session, community_id)
+            community_json = extract_community_subgraph(session, community_id, case_id=case_id)
             
         if not community_json:
             raise HTTPException(status_code=404, detail="Community not found or empty.")
@@ -244,11 +290,14 @@ async def synthesize_community(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/entire-graph/extract")
-def extract_entire_graph_endpoint():
-    """Extracts the global JSON data contract across all 9 syndicates and the entire graph."""
+def extract_entire_graph_endpoint(
+    case_id: Optional[str] = None,
+    current_user: Optional[UserModel] = Depends(get_current_user)
+):
+    """Extracts the global JSON data contract across syndicates for the case or entire graph."""
     try:
         with neo4j_client.driver.session() as session:
-            payload = extract_entire_graph_subgraph(session)
+            payload = extract_entire_graph_subgraph(session, case_id=case_id)
             if not payload:
                 raise HTTPException(status_code=404, detail="Graph is empty.")
             return payload
@@ -256,11 +305,15 @@ def extract_entire_graph_endpoint():
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/entire-graph/synthesize")
-async def synthesize_entire_graph(request: Request):
-    """Triggers the LangGraph multi-agent pipeline on the ENTIRE graph with real-time SSE streaming."""
+async def synthesize_entire_graph(
+    request: Request,
+    case_id: Optional[str] = None,
+    current_user: Optional[UserModel] = Depends(get_current_user)
+):
+    """Triggers the LangGraph multi-agent pipeline on the graph with real-time SSE streaming."""
     try:
         with neo4j_client.driver.session() as session:
-            community_json = extract_entire_graph_subgraph(session)
+            community_json = extract_entire_graph_subgraph(session, case_id=case_id)
             
         if not community_json:
             raise HTTPException(status_code=404, detail="Entire graph dataset empty.")
@@ -279,13 +332,21 @@ async def synthesize_entire_graph(request: Request):
 
             try:
                 yield {"data": json.dumps(make_log("System", "Initializing global multi-agent pipeline across entire knowledge graph...", "system"))}
-                yield {"data": json.dumps(make_log("System", f"Targeting Global Panorama: 81 Nodes, 107 Relationships across 9 Syndicates", "system"))}
+                node_cnt = len(community_json.get("offenders", []))
+                syn_cnt = len(community_json.get("syndicates", []))
+                rel_cnt = (
+                    len(community_json.get("financial_transactions", [])) +
+                    len(community_json.get("communications_cdr", [])) +
+                    len(community_json.get("digital_ipdr", [])) +
+                    len(community_json.get("inter_syndicate_bridges", []))
+                )
+                yield {"data": json.dumps(make_log("System", f"Targeting Graph Panorama: {node_cnt} Nodes, {rel_cnt} Relationships across {syn_cnt} Syndicates / Clusters", "system"))}
                 
                 # Progressive live forensic thoughts yielded continuously (every 2.5s) while each agent is actively reasoning
                 agent_live_thoughts = {
                     "financial_agent": [
-                        ("Financial Agent", "Analyzing global money mule accounts and systemic fund dispersion across all 9 syndicates..."),
-                        ("Financial Agent", "Tracing 24 cross-syndicate transaction bridges and centralized Hawala clearing conduits..."),
+                        ("Financial Agent", "Analyzing global money mule accounts and systemic fund dispersion across all syndicates..."),
+                        ("Financial Agent", "Tracing cross-syndicate transaction bridges and centralized Hawala clearing conduits..."),
                         ("Financial Agent", "Evaluating systemic deposit thresholds, smurfing structures, and rapid ATM liquidations..."),
                         ("Financial Agent", "Pre-query check: Evaluating global PageRank absorption hubs and Dijkstra cross-cell paths..."),
                         ("Financial Agent", "Synthesizing statewide financial freeze directives and PMLA attachment targets on GPU...")
@@ -294,7 +355,7 @@ async def synthesize_entire_graph(request: Request):
                         ("Temporal Agent", "Analyzing Call Detail Records (CDR) and IPDR sessions across all jurisdictional cells..."),
                         ("Temporal Agent", "Correlating nationwide telecommunication burst spikes and off-hours operational synchronicity..."),
                         ("Temporal Agent", "Cross-referencing inter-syndicate trigger signaling calls preceding major banking transfers..."),
-                        ("Temporal Agent", "Pre-query check: Auditing multi-cell timestamp chronologies across 9 criminal cells..."),
+                        ("Temporal Agent", "Pre-query check: Auditing multi-cell timestamp chronologies across all criminal cells..."),
                         ("Temporal Agent", "Formulating statewide criminal conspiracy timeline under IPC 120-B on GPU...")
                     ],
                     "spatial_agent": [
@@ -307,7 +368,7 @@ async def synthesize_entire_graph(request: Request):
                     "lead_detective": [
                         ("Lead Detective", "Chief analytical layer activated on GPU for Global Panorama..."),
                         ("Lead Detective", "Fusing statewide financial, temporal, and geospatial intelligence streams..."),
-                        ("Lead Detective", "Auditing 9 syndicates against global GDS PageRank and Betweenness centralities..."),
+                        ("Lead Detective", "Auditing all detected syndicates against global GDS PageRank and Betweenness centralities..."),
                         ("Lead Detective", "Pre-query check: Evaluating if runtime Neo4j Cypher verification query is required..."),
                         ("Lead Detective", "Synthesizing master multi-syndicate strike plan and executive dossier on GPU...")
                     ]

@@ -3,7 +3,9 @@
  * Purely backend-driven: Zero mock data.
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+const API_BASE = typeof window !== 'undefined'
+  ? `${window.location.protocol}//${window.location.hostname}:8000`
+  : (process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000');
 
 // ==========================================
 // IDENTITY & ACCESS MANAGEMENT (IAM) TYPES
@@ -693,28 +695,28 @@ export const apiClient = {
   // === GENERIC REQUEST ===
   async request<T = any>(endpoint: string, options?: RequestInit): Promise<T> {
     const url = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`;
-    const res = await fetch(url, options);
+    const res = await authFetch(url, options);
     return handleResponse<T>(res);
   },
 
   // === CASES & EVIDENCE ===
   async listCases(): Promise<Case[]> {
     return cachedFetch<Case[]>('list_cases', 4000, async () => {
-      const res = await fetch(`${API_BASE}/api/cases`);
+      const res = await authFetch(`${API_BASE}/api/cases`);
       return handleResponse<Case[]>(res);
     });
   },
 
   async getCaseDetails(caseId: string): Promise<CaseDetail> {
     return cachedFetch<CaseDetail>(`case_detail_${caseId}`, 8000, async () => {
-      const res = await fetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}`);
+      const res = await authFetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}`);
       return handleResponse<CaseDetail>(res);
     });
   },
 
   async createCase(payload: CaseCreatePayload): Promise<Case> {
     _apiCache.delete('list_cases');
-    const res = await fetch(`${API_BASE}/api/cases`, {
+    const res = await authFetch(`${API_BASE}/api/cases`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -725,7 +727,7 @@ export const apiClient = {
   async deleteCase(caseId: string): Promise<any> {
     _apiCache.delete('list_cases');
     _apiCache.delete(`case_detail_${caseId}`);
-    const res = await fetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}`, {
+    const res = await authFetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}`, {
       method: 'DELETE',
     });
     return handleResponse<any>(res);
@@ -733,7 +735,7 @@ export const apiClient = {
 
   async deleteAllCases(): Promise<any> {
     _apiCache.clear();
-    const res = await fetch(`${API_BASE}/api/cases`, {
+    const res = await authFetch(`${API_BASE}/api/cases`, {
       method: 'DELETE',
     });
     return handleResponse<any>(res);
@@ -744,7 +746,7 @@ export const apiClient = {
     formData.append('file', file);
     if (notes) formData.append('notes', notes);
 
-    const res = await fetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/evidence`, {
+    const res = await authFetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/evidence`, {
       method: 'POST',
       body: formData,
     });
@@ -781,7 +783,7 @@ export const apiClient = {
     const url = caseId
       ? `${API_BASE}/api/ingest/trigger_all?case_id=${encodeURIComponent(caseId)}`
       : `${API_BASE}/api/ingest/trigger_all`;
-    const res = await fetch(url, {
+    const res = await authFetch(url, {
       method: 'POST',
     });
     return handleResponse<any>(res);
@@ -791,7 +793,7 @@ export const apiClient = {
     const url = caseId 
       ? `${API_BASE}/api/ingest/events?case_id=${encodeURIComponent(caseId)}&limit=${limit}`
       : `${API_BASE}/api/ingest/events?limit=${limit}`;
-    const res = await fetch(url);
+    const res = await authFetch(url);
     return handleResponse<any[]>(res);
   },
 
@@ -800,7 +802,7 @@ export const apiClient = {
     const url = caseId 
       ? `${API_BASE}/api/zingg/execute?case_id=${encodeURIComponent(caseId)}`
       : `${API_BASE}/api/zingg/execute`;
-    const res = await fetch(url, {
+    const res = await authFetch(url, {
       method: 'POST',
     });
     return handleResponse<any>(res);
@@ -812,7 +814,7 @@ export const apiClient = {
       const url = caseId 
         ? `${API_BASE}/api/system/golden_profiles?case_id=${encodeURIComponent(caseId)}`
         : `${API_BASE}/api/system/golden_profiles`;
-      const res = await fetch(url);
+      const res = await authFetch(url);
       return handleResponse<GoldenProfile[]>(res);
     });
   },
@@ -823,7 +825,7 @@ export const apiClient = {
     const url = caseId 
       ? `${API_BASE}/api/graph/sync?case_id=${encodeURIComponent(caseId)}`
       : `${API_BASE}/api/graph/sync`;
-    const res = await fetch(url, {
+    const res = await authFetch(url, {
       method: 'POST',
     });
     return handleResponse<any>(res);
@@ -836,7 +838,7 @@ export const apiClient = {
         const url = caseId 
           ? `${API_BASE}/api/graph/topology?case_id=${encodeURIComponent(caseId)}`
           : `${API_BASE}/api/graph/topology`;
-        const res = await fetch(url);
+        const res = await authFetch(url);
         return await handleResponse<GraphTopology>(res);
       } catch (err) {
         console.warn('Graph topology retrieval skipped/fallback:', err);
@@ -850,14 +852,14 @@ export const apiClient = {
     const url = caseId 
       ? `${API_BASE}/api/geo/sync-data?case_id=${encodeURIComponent(caseId)}`
       : `${API_BASE}/api/geo/sync-data`;
-    const res = await fetch(url);
+    const res = await authFetch(url);
     return handleResponse<GeoSyncData>(res);
   },
 
   // === ANOMALY INTELLIGENCE ===
   async getDetectorHealth(): Promise<DetectorHealthResponse> {
     return cachedFetch<DetectorHealthResponse>('detector_health', 15000, async () => {
-      const res = await fetch(`${API_BASE}/api/anomalies/health`);
+      const res = await authFetch(`${API_BASE}/api/anomalies/health`);
       return handleResponse<DetectorHealthResponse>(res);
     });
   },
@@ -868,7 +870,7 @@ export const apiClient = {
       const url = caseId 
         ? `${API_BASE}/api/anomalies/stats?case_id=${encodeURIComponent(caseId)}`
         : `${API_BASE}/api/anomalies/stats`;
-      const res = await fetch(url);
+      const res = await authFetch(url);
       return handleResponse<AnomalyStats>(res);
     });
   },
@@ -880,12 +882,12 @@ export const apiClient = {
     if (params?.caseId) query.append('case_id', params.caseId);
 
     const url = `${API_BASE}/api/anomalies${query.toString() ? `?${query.toString()}` : ''}`;
-    const res = await fetch(url);
+    const res = await authFetch(url);
     return handleResponse<{ anomalies: AnomalyFinding[]; total: number }>(res);
   },
 
   async getAnomalyById(findingId: string): Promise<AnomalyFinding> {
-    const res = await fetch(`${API_BASE}/api/anomalies/${encodeURIComponent(findingId)}`);
+    const res = await authFetch(`${API_BASE}/api/anomalies/${encodeURIComponent(findingId)}`);
     return handleResponse<AnomalyFinding>(res);
   },
 
@@ -893,43 +895,43 @@ export const apiClient = {
     const url = caseId 
       ? `${API_BASE}/api/anomalies/analyze?case_id=${encodeURIComponent(caseId)}&sync=true`
       : `${API_BASE}/api/anomalies/analyze?sync=true`;
-    const res = await fetch(url, { method: 'POST' });
+    const res = await authFetch(url, { method: 'POST' });
     return handleResponse<{ message: string; result: AnomalyRunResult }>(res);
   },
 
   async getCaseSummary(caseId: string): Promise<any> {
-    const res = await fetch(`${API_BASE}/api/anomalies/cases/${encodeURIComponent(caseId)}/summary`);
+    const res = await authFetch(`${API_BASE}/api/anomalies/cases/${encodeURIComponent(caseId)}/summary`);
     return handleResponse<any>(res);
   },
 
   async getCaseSignals(caseId: string, limit: number = 200): Promise<{ case_id: string; total_signals: number; signals: any[] }> {
-    const res = await fetch(`${API_BASE}/api/anomalies/cases/${encodeURIComponent(caseId)}/signals?limit=${limit}`);
+    const res = await authFetch(`${API_BASE}/api/anomalies/cases/${encodeURIComponent(caseId)}/signals?limit=${limit}`);
     return handleResponse<{ case_id: string; total_signals: number; signals: any[] }>(res);
   },
 
   async getFindingEvidence(findingId: string): Promise<any> {
-    const res = await fetch(`${API_BASE}/api/anomalies/findings/${encodeURIComponent(findingId)}/evidence`);
+    const res = await authFetch(`${API_BASE}/api/anomalies/findings/${encodeURIComponent(findingId)}/evidence`);
     return handleResponse<any>(res);
   },
 
   async getFindingTimeline(findingId: string): Promise<any> {
-    const res = await fetch(`${API_BASE}/api/anomalies/findings/${encodeURIComponent(findingId)}/timeline`);
+    const res = await authFetch(`${API_BASE}/api/anomalies/findings/${encodeURIComponent(findingId)}/timeline`);
     return handleResponse<any>(res);
   },
 
   async getFindingGraphContext(findingId: string): Promise<any> {
-    const res = await fetch(`${API_BASE}/api/anomalies/findings/${encodeURIComponent(findingId)}/graph-context`);
+    const res = await authFetch(`${API_BASE}/api/anomalies/findings/${encodeURIComponent(findingId)}/graph-context`);
     return handleResponse<any>(res);
   },
 
   async getFindingSpatialContext(findingId: string): Promise<any> {
-    const res = await fetch(`${API_BASE}/api/anomalies/findings/${encodeURIComponent(findingId)}/spatial-context`);
+    const res = await authFetch(`${API_BASE}/api/anomalies/findings/${encodeURIComponent(findingId)}/spatial-context`);
     return handleResponse<any>(res);
   },
 
   // === SYSTEM RESET ===
   async resetSystem(): Promise<any> {
-    const res = await fetch(`${API_BASE}/api/system/reset`, { method: 'POST' });
+    const res = await authFetch(`${API_BASE}/api/system/reset`, { method: 'POST' });
     return handleResponse<any>(res);
   },
 
@@ -965,7 +967,7 @@ export const apiClient = {
     if (params.offset) query.append('offset', params.offset.toString());
 
     const url = `${API_BASE}/api/timeline/events${query.toString() ? `?${query.toString()}` : ''}`;
-    const res = await fetch(url);
+    const res = await authFetch(url);
     return handleResponse<TimelineQueryResponse>(res);
   },
 
@@ -973,7 +975,7 @@ export const apiClient = {
     const url = caseId
       ? `${API_BASE}/api/timeline/events/${encodeURIComponent(eventId)}?case_id=${encodeURIComponent(caseId)}`
       : `${API_BASE}/api/timeline/events/${encodeURIComponent(eventId)}`;
-    const res = await fetch(url);
+    const res = await authFetch(url);
     return handleResponse<TimelineCanonicalEvent>(res);
   },
 
@@ -985,7 +987,7 @@ export const apiClient = {
     const query = new URLSearchParams({ window_minutes: windowMinutes.toString() });
     if (caseId) query.append('case_id', caseId);
     const url = `${API_BASE}/api/timeline/events/${encodeURIComponent(eventId)}/context?${query.toString()}`;
-    const res = await fetch(url);
+    const res = await authFetch(url);
     return handleResponse<any>(res);
   },
 
@@ -993,7 +995,7 @@ export const apiClient = {
     const url = caseId
       ? `${API_BASE}/api/timeline/correlations?case_id=${encodeURIComponent(caseId)}`
       : `${API_BASE}/api/timeline/correlations`;
-    const res = await fetch(url);
+    const res = await authFetch(url);
     return handleResponse<TemporalCorrelation[]>(res);
   },
 
@@ -1001,7 +1003,7 @@ export const apiClient = {
     const url = caseId
       ? `${API_BASE}/api/timeline/bursts?case_id=${encodeURIComponent(caseId)}`
       : `${API_BASE}/api/timeline/bursts`;
-    const res = await fetch(url);
+    const res = await authFetch(url);
     return handleResponse<ActivityBurst[]>(res);
   },
 
@@ -1009,7 +1011,7 @@ export const apiClient = {
     const url = caseId
       ? `${API_BASE}/api/timeline/inconsistencies?case_id=${encodeURIComponent(caseId)}`
       : `${API_BASE}/api/timeline/inconsistencies`;
-    const res = await fetch(url);
+    const res = await authFetch(url);
     return handleResponse<TemporalInconsistency[]>(res);
   },
 
@@ -1017,7 +1019,7 @@ export const apiClient = {
     const url = caseId
       ? `${API_BASE}/api/timeline/storylines?case_id=${encodeURIComponent(caseId)}`
       : `${API_BASE}/api/timeline/storylines`;
-    const res = await fetch(url);
+    const res = await authFetch(url);
     return handleResponse<StorylineSequence[]>(res);
   },
 
@@ -1025,7 +1027,7 @@ export const apiClient = {
     const query = new URLSearchParams({ entities: entities.join(',') });
     if (caseId) query.append('case_id', caseId);
     const url = `${API_BASE}/api/timeline/compare?${query.toString()}`;
-    const res = await fetch(url);
+    const res = await authFetch(url);
     return handleResponse<Record<string, TimelineCanonicalEvent[]>>(res);
   },
 
@@ -1050,24 +1052,24 @@ export const apiClient = {
       query.append('max_lng', params.bbox[2].toString());
       query.append('max_lat', params.bbox[3].toString());
     }
-    const res = await fetch(`${API_BASE}/api/geo/investigation?${query.toString()}`);
+    const res = await authFetch(`${API_BASE}/api/geo/investigation?${query.toString()}`);
     return handleResponse<GeoInvestigationResponse>(res);
   },
 
   async getGeoMovements(caseId: string, entityIds?: string[]): Promise<MovementSegment[]> {
     const query = new URLSearchParams({ case_id: caseId });
     if (entityIds?.length) query.append('entity_ids', entityIds.join(','));
-    const res = await fetch(`${API_BASE}/api/geo/movements?${query.toString()}`);
+    const res = await authFetch(`${API_BASE}/api/geo/movements?${query.toString()}`);
     return handleResponse<MovementSegment[]>(res);
   },
 
   async getGeoCoLocations(caseId: string): Promise<CoLocationFinding[]> {
-    const res = await fetch(`${API_BASE}/api/geo/co-locations?case_id=${encodeURIComponent(caseId)}`);
+    const res = await authFetch(`${API_BASE}/api/geo/co-locations?case_id=${encodeURIComponent(caseId)}`);
     return handleResponse<CoLocationFinding[]>(res);
   },
 
   async getGeoCommonPlaces(caseId: string): Promise<CommonPlace[]> {
-    const res = await fetch(`${API_BASE}/api/geo/common-places?case_id=${encodeURIComponent(caseId)}`);
+    const res = await authFetch(`${API_BASE}/api/geo/common-places?case_id=${encodeURIComponent(caseId)}`);
     return handleResponse<CommonPlace[]>(res);
   },
 
@@ -1079,7 +1081,7 @@ export const apiClient = {
     start_time?: string;
     end_time?: string;
   }): Promise<AreaInvestigationResult> {
-    const res = await fetch(`${API_BASE}/api/geo/area-query`, {
+    const res = await authFetch(`${API_BASE}/api/geo/area-query`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -1093,18 +1095,18 @@ export const apiClient = {
       event_id: eventId,
       window_seconds: windowSeconds.toString()
     });
-    const res = await fetch(`${API_BASE}/api/geo/segment-context?${query.toString()}`);
+    const res = await authFetch(`${API_BASE}/api/geo/segment-context?${query.toString()}`);
     return handleResponse<any>(res);
   },
 
   async exportGeoDossier(caseId: string, format: 'geojson' | 'json' = 'geojson'): Promise<any> {
-    const res = await fetch(`${API_BASE}/api/geo/export?case_id=${encodeURIComponent(caseId)}&format=${format}`);
+    const res = await authFetch(`${API_BASE}/api/geo/export?case_id=${encodeURIComponent(caseId)}&format=${format}`);
     return handleResponse<any>(res);
   },
 
   // === CCTV LOCATION & ROUTE INTELLIGENCE ===
   async getCCTVContext(caseId: string): Promise<CCTVIncidentLocation> {
-    const res = await fetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/cctv/context`);
+    const res = await authFetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/cctv/context`);
     return handleResponse<CCTVIncidentLocation>(res);
   },
 
@@ -1118,7 +1120,7 @@ export const apiClient = {
     incident_time?: string;
     search_radius_meters?: number;
   }): Promise<CCTVIntelligenceResponse> {
-    const res = await fetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/cctv/analyze`, {
+    const res = await authFetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/cctv/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -1127,7 +1129,7 @@ export const apiClient = {
   },
 
   async getCCTVResults(caseId: string): Promise<CCTVIntelligenceResponse> {
-    const res = await fetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/cctv/results`);
+    const res = await authFetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/cctv/results`);
     return handleResponse<CCTVIntelligenceResponse>(res);
   },
 
@@ -1137,7 +1139,7 @@ export const apiClient = {
     camera_count_confirmed?: number;
     notes?: string;
   }): Promise<any> {
-    const res = await fetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/cctv/sources/${encodeURIComponent(sourceId)}/verify`, {
+    const res = await authFetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/cctv/sources/${encodeURIComponent(sourceId)}/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -1156,7 +1158,7 @@ export const apiClient = {
     notes?: string;
     cctv_present?: boolean;
   }): Promise<any> {
-    const res = await fetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/cctv/sources/manual`, {
+    const res = await authFetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/cctv/sources/manual`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -1168,7 +1170,7 @@ export const apiClient = {
     item_type?: string;
     notes?: string;
   }): Promise<any> {
-    const res = await fetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/cctv/sources/${encodeURIComponent(sourceId)}/add-to-case`, {
+    const res = await authFetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/cctv/sources/${encodeURIComponent(sourceId)}/add-to-case`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload || { item_type: 'SOURCE' })
