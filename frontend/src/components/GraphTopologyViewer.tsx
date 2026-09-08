@@ -466,9 +466,12 @@ export default function GraphTopologyViewer({
     cyRef.current.on('layoutstop', () => {
       try {
         const pending = pendingFocusRef.current;
-        if (pending && (pending.targetId || pending.targetIds || (pending.communityId !== null && pending.communityId !== undefined))) {
-          applyFocusToGraph(pending.targetId || null, pending.targetIds || null, pending.communityId);
-        } else if (!focusEntityId && !focusEntityIds && focusCommunityId === null) {
+        if (pending && (pending.targetId || (pending.targetIds && pending.targetIds.length > 0) || (pending.communityId !== null && pending.communityId !== undefined))) {
+          setTimeout(() => {
+            applyFocusToGraph(pending.targetId || null, pending.targetIds || null, pending.communityId);
+            pendingFocusRef.current = null;
+          }, 100);
+        } else if (!focusEntityId && (!focusEntityIds || focusEntityIds.length === 0) && (focusCommunityId === null || focusCommunityId === undefined)) {
           cyRef.current?.fit(undefined, 80);
         }
       } catch (err) {
@@ -521,10 +524,52 @@ export default function GraphTopologyViewer({
         setSelectedNode(null);
         setSelectedEdge(null);
         setActiveDrawer(null);
+        setActiveFocusId(null);
+        pendingFocusRef.current = null;
       }
     });
 
   }, [graphData, layoutName, activeFilters, searchQuery]); // Removed isDark to prevent destroy/recreate on theme switch
+
+  const nodeMatches = useCallback((d: any, targetStr: string, targetClean: string) => {
+    if (!d) return false;
+    const checkVal = (val: any): boolean => {
+      if (val === null || val === undefined) return false;
+      if (Array.isArray(val)) {
+        return val.some(item => checkVal(item));
+      }
+      const s = String(val).toLowerCase().trim();
+      if (!s) return false;
+      if (s === targetStr) return true;
+      if (targetStr.length >= 3 && (s.includes(targetStr) || targetStr.includes(s))) return true;
+      const sClean = s.replace(/[^a-z0-9]/g, '');
+      if (targetClean.length >= 3 && (sClean.includes(targetClean) || targetClean.includes(sClean))) return true;
+      return false;
+    };
+
+    const props = d.properties || {};
+    return (
+      checkVal(d.id) ||
+      checkVal(d.label) ||
+      checkVal(props.name) ||
+      checkVal(props.primary_name) ||
+      checkVal(props.golden_id) ||
+      checkVal(props.z_cluster_id) ||
+      checkVal(props.number) ||
+      checkVal(props.phone) ||
+      checkVal(props.phones) ||
+      checkVal(props.aliases) ||
+      checkVal(props.emails) ||
+      checkVal(props.account_number) ||
+      checkVal(props.account) ||
+      checkVal(props.holder) ||
+      checkVal(props.handle) ||
+      checkVal(props.imei_number) ||
+      checkVal(props.tower_id) ||
+      checkVal(props.address) ||
+      checkVal(props.national_ids)
+    );
+  }, []);
 
   const applyFocusToGraph = useCallback((targetId: string | null, targetIds: string[] | null, communityId: any) => {
     if (!cyRef.current) return;
@@ -532,62 +577,86 @@ export default function GraphTopologyViewer({
 
     // 1. Focus by Community ID
     if (communityId !== null && communityId !== undefined) {
-      const commStr = String(communityId);
+      const commStr = String(communityId).trim();
+
+      // 1.1 "all" community (Entire Case Graph Panorama)
+      if (commStr.toLowerCase() === 'all') {
+        setActiveFocusId('Entire Case Graph');
+        cy.elements().removeClass('dimmed').addClass('highlighted');
+        cy.animate({
+          fit: { padding: 80 },
+          duration: 800,
+          easing: 'ease-in-out'
+        });
+        return;
+      }
+
+      // 1.2 Specific community ID
       setActiveFocusId(`Syndicate #${commStr}`);
-      
-      const commNodes = cy.nodes().filter((n: any) => {
+      let commNodes = cy.nodes().filter((n: any) => {
         const props = n.data('properties') || {};
         return String(props.communityId) === commStr;
       });
 
+      // Fallback: If no nodes match props.communityId === commStr, match via targetIds/member_ids
+      if (commNodes.length === 0 && targetIds && targetIds.length > 0) {
+        const idSet = new Set(targetIds.map(i => String(i).toLowerCase().trim()));
+        commNodes = cy.nodes().filter((n: any) => {
+          const d = n.data();
+          return Array.from(idSet).some(id => {
+            const tStr = id.toLowerCase().trim();
+            const tClean = tStr.replace(/[^a-z0-9]/g, '');
+            return nodeMatches(d, tStr, tClean);
+          });
+        });
+      }
+
       if (commNodes.length > 0) {
+        // Find all connected edges and connected neighbor nodes (1-hop connected nodes)
+        const connectedEdges = commNodes.connectedEdges();
+        const connectedNeighbors = connectedEdges.connectedNodes();
+        const neighborhood = commNodes.union(connectedNeighbors).union(connectedEdges);
+
         cy.elements().removeClass('highlighted dimmed');
-        const commEdges = commNodes.edgesWith(commNodes);
-        
-        // Dim all unrelated nodes and edges
-        cy.elements().not(commNodes).not(commEdges).addClass('dimmed');
+        // Dim everything outside the neighborhood
+        cy.elements().not(neighborhood).addClass('dimmed');
+
+        // Highlight syndicate nodes, connected neighbor nodes, and connecting edges
         commNodes.addClass('highlighted');
-        commEdges.addClass('highlighted');
+        connectedNeighbors.addClass('highlighted');
+        connectedEdges.addClass('highlighted');
 
         cy.animate({
-          fit: { eles: commNodes, padding: 80 },
-          duration: 900,
+          fit: { eles: neighborhood, padding: 80 },
+          duration: 800,
           easing: 'ease-in-out'
         });
-        pendingFocusRef.current = null;
+        return;
       }
-      return;
     }
 
     // 2. Focus by Multiple Entity IDs
     if (targetIds && targetIds.length > 0) {
       const idSet = new Set(targetIds.map(i => String(i).toLowerCase().trim()));
       setActiveFocusId(`${targetIds.length} Entities`);
-      
+
       const matchedNodes = cy.nodes().filter((n: any) => {
         const d = n.data();
-        const props = d.properties || {};
-        const check = (val: any) => {
-          if (!val) return false;
-          const s = String(val).toLowerCase().trim();
-          return idSet.has(s) || Array.from(idSet).some(id => s.includes(id) || id.includes(s));
-        };
-        return check(d.id) ||
-               check(d.label) ||
-               check(props.golden_id) ||
-               check(props.number) ||
-               check(props.account_number) ||
-               check(props.handle) ||
-               check(props.name);
+        return Array.from(idSet).some(id => {
+          const tStr = id.toLowerCase().trim();
+          const tClean = tStr.replace(/[^a-z0-9]/g, '');
+          return nodeMatches(d, tStr, tClean);
+        });
       });
 
       if (matchedNodes.length > 0) {
-        cy.elements().removeClass('highlighted dimmed');
         const connectedEdges = matchedNodes.connectedEdges();
         const connectedNeighbors = connectedEdges.connectedNodes();
         const neighborhood = matchedNodes.union(connectedNeighbors).union(connectedEdges);
 
+        cy.elements().removeClass('highlighted dimmed');
         cy.elements().not(neighborhood).addClass('dimmed');
+
         matchedNodes.addClass('highlighted');
         connectedNeighbors.addClass('highlighted');
         connectedEdges.addClass('highlighted');
@@ -597,9 +666,8 @@ export default function GraphTopologyViewer({
           duration: 800,
           easing: 'ease-in-out'
         });
-        pendingFocusRef.current = null;
+        return;
       }
-      return;
     }
 
     // 3. Focus by Single Entity ID (Pivot to Graph Visualizer)
@@ -609,75 +677,73 @@ export default function GraphTopologyViewer({
       if (!node || node.length === 0) {
         const targetStr = String(targetId).toLowerCase().trim();
         const targetClean = targetStr.replace(/[^a-z0-9]/g, '');
-
-        node = cy.nodes().filter((n: any) => {
-          const d = n.data();
-          const props = d.properties || {};
-          const check = (val: any) => {
-            if (!val) return false;
-            const s = String(val).toLowerCase().trim();
-            const sClean = s.replace(/[^a-z0-9]/g, '');
-            return s === targetStr || 
-                   (targetClean.length >= 3 && sClean.includes(targetClean)) || 
-                   (sClean.length >= 3 && targetClean.includes(sClean)) ||
-                   s.includes(targetStr) || 
-                   targetStr.includes(s);
-          };
-          return check(d.label) ||
-                 check(d.id) ||
-                 check(props.name) ||
-                 check(props.golden_id) ||
-                 check(props.z_cluster_id) ||
-                 check(props.number) ||
-                 check(props.phone) ||
-                 check(props.account_number) ||
-                 check(props.account) ||
-                 check(props.holder) ||
-                 check(props.handle) ||
-                 check(props.tower_id) ||
-                 check(props.address);
-        });
+        node = cy.nodes().filter((n: any) => nodeMatches(n.data(), targetStr, targetClean));
       }
 
       if (node && node.length > 0) {
-        cy.elements().removeClass('highlighted dimmed');
         const targetNode = node[0];
         const connectedEdges = targetNode.connectedEdges();
         const connectedNodes = connectedEdges.connectedNodes();
         const neighborhood = targetNode.union(connectedNodes).union(connectedEdges);
 
-        // Dim everything outside the 1-hop neighborhood
+        cy.elements().removeClass('highlighted dimmed');
         cy.elements().not(neighborhood).addClass('dimmed');
 
-        // Prominently highlight target node, all connecting edges, and all 1-hop neighbor nodes
         targetNode.addClass('highlighted');
         connectedNodes.addClass('highlighted');
         connectedEdges.addClass('highlighted');
 
-        // Smooth camera viewport framing to encompass the complete connected neighborhood
         cy.animate({
           fit: { eles: neighborhood, padding: 85 },
           duration: 800,
           easing: 'ease-in-out'
         });
 
-        // Set selected node to open drawer inspector
         setSelectedNode(targetNode.data());
+        setSelectedEdge(null);
         setActiveDrawer('node');
-        pendingFocusRef.current = null;
+        return;
       }
     }
-  }, []);
+
+    // Fallback: If no target nodes matched, un-dim all and fit canvas
+    cy.elements().removeClass('dimmed');
+    cy.animate({
+      fit: { padding: 80 },
+      duration: 600,
+      easing: 'ease-in-out'
+    });
+  }, [nodeMatches]);
 
   useEffect(() => {
-    pendingFocusRef.current = {
-      targetId: focusEntityId || null,
-      targetIds: focusEntityIds || null,
-      communityId: focusCommunityId !== undefined ? focusCommunityId : null
-    };
+    const hasFocus = Boolean(
+      focusEntityId || 
+      (focusEntityIds && focusEntityIds.length > 0) || 
+      (focusCommunityId !== null && focusCommunityId !== undefined)
+    );
 
-    if (cyRef.current && (focusEntityId || focusEntityIds || (focusCommunityId !== null && focusCommunityId !== undefined))) {
-      applyFocusToGraph(focusEntityId || null, focusEntityIds || null, focusCommunityId);
+    if (hasFocus) {
+      // Ensure all node type filters are active and search is cleared so connected notes are visible
+      setActiveFilters({
+        Person: true, Phone: true, BankAccount: true, Device: true, IMEI: true, 
+        CellTower: true, IPAddress: true, Location: true, SocialAccount: true, 
+        Transaction: true, Organization: true, Bank: true, Email: true
+      });
+      setSearchQuery('');
+
+      pendingFocusRef.current = {
+        targetId: focusEntityId || null,
+        targetIds: focusEntityIds || null,
+        communityId: focusCommunityId !== undefined ? focusCommunityId : null
+      };
+
+      if (cyRef.current) {
+        setTimeout(() => {
+          if (cyRef.current) {
+            applyFocusToGraph(focusEntityId || null, focusEntityIds || null, focusCommunityId);
+          }
+        }, 150);
+      }
     }
   }, [focusEntityId, focusEntityIds, focusCommunityId, graphData, applyFocusToGraph]);
 
@@ -740,6 +806,7 @@ export default function GraphTopologyViewer({
               onClick={() => {
                 setActiveFocusId(null);
                 onClearFocus?.();
+                pendingFocusRef.current = null;
                 if (cyRef.current) {
                   cyRef.current.elements().removeClass('highlighted dimmed');
                   cyRef.current.animate({ fit: { padding: 50 }, duration: 500 });

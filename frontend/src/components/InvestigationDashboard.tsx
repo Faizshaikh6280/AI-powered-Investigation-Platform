@@ -43,6 +43,21 @@ export function InvestigationDashboard({ activeCaseId, onNavigateToGraph }: Inve
     dossier: any;
   }>({ status: 'idle', messages: [], dossier: null });
 
+  const [isCommunityDropdownOpen, setIsCommunityDropdownOpen] = useState<boolean>(false);
+  const communityDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (communityDropdownRef.current && !communityDropdownRef.current.contains(event.target as Node)) {
+        setIsCommunityDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
   useEffect(() => {
     if (!activeCaseId) return;
     setGdsStatus('running');
@@ -307,34 +322,155 @@ export function InvestigationDashboard({ activeCaseId, onNavigateToGraph }: Inve
             </div>
           ) : (
             <>
-              <div className="flex flex-col sm:flex-row gap-4">
-                <select 
-                  className="flex-1 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-600 rounded-xl p-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-medium shadow-sm"
-                  value={selectedCommunity || ''}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setSelectedCommunity(val === 'all' ? 'all' : Number(val));
-                  }}
-                >
-                  <option value="" disabled className="text-slate-400 bg-white dark:bg-slate-800">-- Select a Target Syndicate Network --</option>
-                  <option value="all" className="font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-slate-800">
-                    🌐 ENTIRE CASE GRAPH PANORAMA &mdash; All {communities.length} Detected Syndicates ({communities.reduce((acc, c) => acc + (c.size || 0), 0)} Total Entities)
-                  </option>
-                  {communities.map(c => {
-                    const lead = c.kingpin ? ` • Lead: ${c.kingpin}` : '';
-                    const profile = c.crime_profile ? ` • ${c.crime_profile}` : '';
-                    const relCount = c.relationships_count ? `, ${c.relationships_count} Edges` : '';
-                    return (
-                      <option key={c.communityId} value={c.communityId} className="text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-800">
-                        {c.name || `Syndicate Cluster #${c.communityId}`}{lead}{profile} ({c.size} Nodes{relCount})
-                      </option>
-                    );
-                  })}
-                </select>
+              <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center relative">
+                {/* Custom Responsive Dropdown that NEVER expands out of screen */}
+                <div ref={communityDropdownRef} className="relative flex-1 min-w-0 max-w-full">
+                  <button
+                    type="button"
+                    onClick={() => setIsCommunityDropdownOpen(prev => !prev)}
+                    className="w-full flex items-center justify-between gap-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors text-left min-w-0"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0 truncate">
+                      {selectedCommunity === 'all' ? (
+                        <span className="p-1.5 rounded-lg bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 shrink-0">
+                          <Globe className="w-4 h-4" />
+                        </span>
+                      ) : selectedCommunity ? (
+                        <span className="p-1.5 rounded-lg bg-violet-100 dark:bg-violet-900/50 text-violet-600 dark:text-violet-400 shrink-0">
+                          <Network className="w-4 h-4" />
+                        </span>
+                      ) : (
+                        <span className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-400 shrink-0">
+                          <Users className="w-4 h-4" />
+                        </span>
+                      )}
+
+                      <div className="min-w-0 truncate">
+                        {selectedCommunity === 'all' ? (
+                          <span className="font-bold text-indigo-600 dark:text-indigo-400 truncate block">
+                            Entire Case Graph Panorama ({communities.length} Syndicates)
+                          </span>
+                        ) : selectedCommunity ? (() => {
+                          const c = communities.find(item => item.communityId === selectedCommunity);
+                          return (
+                            <span className="font-bold text-slate-900 dark:text-white truncate block">
+                              {c?.kingpin && c.kingpin !== 'Unknown' ? `${c.kingpin} Syndicate` : c?.name || `Syndicate #${selectedCommunity}`}
+                            </span>
+                          );
+                        })() : (
+                          <span className="text-slate-400 dark:text-slate-500 truncate block">
+                            -- Select a Target Syndicate Network --
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {selectedCommunity === 'all' && (
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
+                          {communities.reduce((acc, c) => acc + (c.size || 0), 0)} Entities
+                        </span>
+                      )}
+                      {selectedCommunity && selectedCommunity !== 'all' && (() => {
+                        const c = communities.find(item => item.communityId === selectedCommunity);
+                        return (
+                          <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20">
+                            {c?.size || 0} Nodes
+                          </span>
+                        );
+                      })()}
+                      <ChevronDown className={cn("w-4 h-4 text-slate-400 transition-transform duration-200", isCommunityDropdownOpen && "rotate-180")} />
+                    </div>
+                  </button>
+
+                  {/* Dropdown Menu List Popup */}
+                  {isCommunityDropdownOpen && (
+                    <div className="absolute left-0 right-0 top-full mt-2 z-50 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl overflow-hidden max-h-80 overflow-y-auto w-full max-w-full divide-y divide-slate-100 dark:divide-slate-800/60 animate-in fade-in slide-in-from-top-2 duration-150">
+                      {/* Option 1: Entire Case Panorama */}
+                      <div
+                        onClick={() => {
+                          setSelectedCommunity('all');
+                          setIsCommunityDropdownOpen(false);
+                        }}
+                        className={cn(
+                          "p-3 flex items-start gap-3 cursor-pointer transition-colors",
+                          selectedCommunity === 'all' 
+                            ? "bg-indigo-50/80 dark:bg-indigo-950/50 text-indigo-900 dark:text-indigo-100" 
+                            : "hover:bg-slate-50 dark:hover:bg-slate-800/60 text-slate-800 dark:text-slate-200"
+                        )}
+                      >
+                        <span className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5">
+                          <Globe className="w-4 h-4" />
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-bold text-sm text-indigo-600 dark:text-indigo-400 truncate">
+                              🌐 ENTIRE CASE GRAPH PANORAMA
+                            </span>
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-indigo-600 text-white shrink-0">
+                              {communities.reduce((acc, c) => acc + (c.size || 0), 0)} ENTITIES
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                            All {communities.length} detected syndicates across the entire case
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Community List */}
+                      {communities.map((c) => {
+                        const isSelected = selectedCommunity === c.communityId;
+                        const lead = c.kingpin && c.kingpin !== 'Unknown' ? c.kingpin : `Cluster #${c.communityId}`;
+                        return (
+                          <div
+                            key={c.communityId}
+                            onClick={() => {
+                              setSelectedCommunity(c.communityId);
+                              setIsCommunityDropdownOpen(false);
+                            }}
+                            className={cn(
+                              "p-3 flex items-start gap-3 cursor-pointer transition-colors",
+                              isSelected 
+                                ? "bg-violet-50/80 dark:bg-violet-950/50 text-violet-900 dark:text-violet-100" 
+                                : "hover:bg-slate-50 dark:hover:bg-slate-800/60 text-slate-800 dark:text-slate-200"
+                            )}
+                          >
+                            <span className="p-1.5 rounded-lg bg-violet-500/10 text-violet-600 dark:text-violet-400 shrink-0 mt-0.5">
+                              <Users className="w-4 h-4" />
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-bold text-sm text-slate-900 dark:text-white truncate">
+                                  {lead} Syndicate
+                                </span>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20">
+                                    {c.size} Nodes
+                                  </span>
+                                  {Number(c.relationships_count || 0) > 0 && (
+                                    <span className="px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-slate-200/60 dark:bg-slate-700/60 text-slate-600 dark:text-slate-300">
+                                      {c.relationships_count} Edges
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                                <span className="truncate">{c.crime_profile || "Extortion & Money Mule Ring"}</span>
+                                <span className="shrink-0">&bull;</span>
+                                <span className="shrink-0 font-medium text-slate-600 dark:text-slate-300">{c.location || "NCR"}</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
                 <button 
                   onClick={runSynthesis}
                   disabled={!selectedCommunity || dossierState.status === 'running' || gdsStatus !== 'done'}
-                  className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-40 text-white font-bold py-3 px-6 rounded-xl flex items-center gap-2 shadow-lg transition-all shrink-0"
+                  className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-40 text-white font-bold py-3 px-6 rounded-xl flex items-center justify-center gap-2 shadow-lg transition-all shrink-0 sm:self-auto"
                 >
                   {dossierState.status === 'running' ? <Activity className="w-5 h-5 animate-spin" /> : <Cpu className="w-5 h-5" />}
                   {selectedCommunity === 'all' ? 'Execute Entire Graph Pipeline' : 'Execute AI Pipeline'}
@@ -478,7 +614,7 @@ export function InvestigationDashboard({ activeCaseId, onNavigateToGraph }: Inve
 
                     {onNavigateToGraph && (
                       <button
-                        onClick={() => onNavigateToGraph(activeCommunityObj.member_ids, selectedCommunity)}
+                        onClick={() => onNavigateToGraph(activeCommunityObj.member_ids || activeCommunityObj.top_members, selectedCommunity)}
                         className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-sm transition"
                       >
                         <ExternalLink className="w-3.5 h-3.5" />
@@ -493,7 +629,7 @@ export function InvestigationDashboard({ activeCaseId, onNavigateToGraph }: Inve
                   caseId={activeCaseId}
                   communityId={selectedCommunity}
                   communityName={activeCommunityObj.name || `Syndicate #${selectedCommunity}`}
-                  onOpenInMainGraph={() => onNavigateToGraph?.(activeCommunityObj.member_ids, selectedCommunity)}
+                  onOpenInMainGraph={() => onNavigateToGraph?.(activeCommunityObj.member_ids || activeCommunityObj.top_members, selectedCommunity)}
                 />
               </div>
             );

@@ -90,6 +90,8 @@ function InvestigationWorkspace() {
 
   const handlePivotToGraph = (entityId: string) => {
     setFocusAnomalyEntityId(entityId);
+    setFocusEntityIds(null);
+    setFocusCommunityId(null);
     setActiveTab('relationship-graph');
   };
 

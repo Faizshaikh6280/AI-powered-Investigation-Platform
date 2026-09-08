@@ -217,6 +217,7 @@ def generate_logical_community_metadata(session, cid: int, case_id: Any = None) 
            [n in nodes WHERE 'Phone' IN labels(n)] as phones,
            [n in nodes WHERE 'CellTower' IN labels(n)] as towers,
            [n in nodes WHERE 'IPAddress' IN labels(n)] as ips,
+           [n in nodes | coalesce(n.name, n.primary_name, n.number, n.account_number, n.handle, n.address, elementId(n))] as member_ids,
            size(nodes) as total_size
     """
     rec = session.run(q, cid=cid, case_id=case_id).single()
@@ -229,7 +230,8 @@ def generate_logical_community_metadata(session, cid: int, case_id: Any = None) 
             "crime_profile": "Operational Nexus",
             "location": "Jurisdiction Zone",
             "size": 0,
-            "top_members": []
+            "top_members": [],
+            "member_ids": []
         }
         
     people = rec["people"]
@@ -290,7 +292,8 @@ def generate_logical_community_metadata(session, cid: int, case_id: Any = None) 
         "size": size,
         "crime_profile": crime_tag,
         "location": loc_str,
-        "top_members": [p.get("name") for p in sorted_people if p.get("name")]
+        "top_members": [p.get("name") for p in sorted_people if p.get("name")],
+        "member_ids": [str(m) for m in rec["member_ids"] if m] if rec and "member_ids" in rec else []
     }
 
 def extract_community_subgraph(session, community_id: int, case_id: Any = None) -> Dict[str, Any]:
