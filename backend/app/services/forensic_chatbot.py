@@ -276,9 +276,14 @@ class ForensicChatbotService:
 
         return schema
 
-    # ── LLM-Driven Tool Classification ─────────────────────────────
+    # ── LLM-Driven / Heuristic Tool Classification ─────────────────
     def classify_tool(self, message: str, history: Optional[List[Dict[str, str]]] = None) -> str:
-        """Uses Qwen 2.5 to classify the user query into the appropriate investigation tool."""
+        """Classifies the user query into the appropriate investigation tool, using fast heuristics first."""
+        # Fast 0ms heuristic match first to avoid unnecessary 15s LLM latency
+        fast_tool = self._keyword_classify(message)
+        if fast_tool:
+            return fast_tool
+
         context_lines = ""
         if history:
             for turn in history[-3:]:
@@ -292,7 +297,7 @@ User question: "{message}"
 Tool:"""
 
         try:
-            llm = get_llm(num_predict=30, num_ctx=1024)
+            llm = get_llm(num_predict=20, num_ctx=512)
             resp = llm.invoke(prompt)
             raw = resp.content if hasattr(resp, "content") else str(resp)
             raw = raw.strip().upper().replace(" ", "_").replace("-", "_")
@@ -307,51 +312,61 @@ Tool:"""
                 if tool in raw:
                     return tool
 
-            return self._keyword_classify(message)
+            return "NEO4J_GRAPH"
         except Exception as e:
             logger.warning(f"[Tool Classification Warning] {e}")
-            return self._keyword_classify(message)
-
-    def _keyword_classify(self, message: str) -> str:
-        """Fallback keyword-based tool classification when LLM is unavailable."""
-        msg = message.lower()
-
-        if any(k in msg for k in ["transaction", "transfer", "bank account", "phone call", "call record",
-                                   "cell tower", "tower", "ping", "connected to", "path between",
-                                   "network", "hop", "graph", "ip address", "linked to", "owns",
-                                   "relationship", "between", "imei", "shortest", "traversal",
-                                   "chain", "multi-hop", "distance", "route"]):
             return "NEO4J_GRAPH"
 
+    def _keyword_classify(self, message: str) -> Optional[str]:
+        """Fast keyword-based tool classification for instantaneous response."""
+        msg = message.lower()
+
+        # Profiling / Suspect / Person lookup
+        if any(k in msg for k in ["suspect", "profile", "alias", "identity", "who is", "who are",
+                                   "tell me about", "known phone", "known account", "cluster"]):
+            return "POSTGRES_PROFILES"
+
+        # Anomalies
         if any(k in msg for k in ["anomal", "unusual", "suspicious", "threat", "detection",
                                    "finding", "risk score", "behavioral"]):
             return "POSTGRES_ANOMALIES"
 
+        # Alerts
         if any(k in msg for k in ["alert", "warning", "triage", "cep pattern", "notification"]):
             return "POSTGRES_ALERTS"
 
-        if any(k in msg for k in ["suspect", "profile", "alias", "identity", "who is",
-                                   "tell me about", "known phone", "known account"]):
-            return "POSTGRES_PROFILES"
-
+        # Evidence files
         if any(k in msg for k in ["evidence", "uploaded file", "data quality", "ingestion",
                                    "processing status", "source type"]):
             return "POSTGRES_EVIDENCE"
 
+        # Reports
         if any(k in msg for k in ["report", "investigation result", "forensic analysis",
                                    "agent result", "community analysis", "synthesis",
                                    "financial specialist", "geographic specialist",
                                    "temporal specialist", "lead dossier"]):
             return "POSTGRES_REPORTS"
 
+        # Cases
         if any(k in msg for k in ["case list", "all cases", "case status", "case detail",
                                    "case overview", "dossier"]):
             return "POSTGRES_CASES"
 
+        # Graph / Network traversals
+        if any(k in msg for k in ["transaction", "transfer", "bank account", "phone call", "call record",
+                                   "cell tower", "tower", "ping", "connected to", "path between",
+                                   "network", "hop", "graph", "ip address", "linked to", "owns",
+                                   "relationship", "between", "imei", "shortest", "traversal",
+                                   "chain", "multi-hop", "distance", "route", "node", "edge"]):
+            return "NEO4J_GRAPH"
+
+        if any(k in msg for k in ["cross-domain", "multi-source", "everything about", "full dossier"]):
+            return "MULTI_SOURCE"
+
         if any(k in msg for k in ["show", "find", "who", "list", "get", "all"]):
             return "NEO4J_GRAPH"
 
-        return "NEO4J_GRAPH"
+        return None
 
     # ── Advanced Multi-Hop Neo4j Cypher Generation ─────────────────
     def generate_cypher_with_qwen(self, prompt: str, schema: Dict[str, Any], case_ids: List[str]) -> str:
@@ -398,8 +413,37 @@ MANDATORY RULES:
 Question: {prompt}
 Cypher:"""
 
+        p_low = prompt.lower()
+        if any(k in p_low for k in ["transfer", "bank", "amount", "money", "transaction"]) and not any(k in p_low for k in ["path", "shortest", "hop"]):
+            name_match = re.search(r'(?:for|of|by|from|to)\s+([a-zA-Z\s]+)', prompt, re.IGNORECASE)
+            if name_match:
+                name_term = name_match.group(1).strip()
+                if name_term and len(name_term) > 2 and name_term.lower() not in ["the", "all", "account", "bank"]:
+                    return f"MATCH (p:Person)-[:OWNS_ACCOUNT]->(b1:BankAccount)-[r:TRANSACTED_WITH]->(b2:BankAccount)\nWHERE (p.case_id IN $case_ids OR ANY(cid IN $case_ids WHERE cid IN coalesce(p.case_ids, []))) AND toLower(p.name) CONTAINS toLower('{name_term}')\nRETURN p.name AS person_name, b1.account_number AS sender_account, coalesce(r.amount, 0) AS amount, b2.account_number AS receiver_account, b2.holder AS receiver_holder\nORDER BY r.amount DESC LIMIT 25"
+            return (
+                "MATCH (b1:BankAccount)-[r:TRANSACTED_WITH]->(b2:BankAccount)\n"
+                "WHERE (b1.case_id IN $case_ids OR ANY(cid IN $case_ids WHERE cid IN coalesce(b1.case_ids, [])))\n"
+                "RETURN b1.account_number AS sender_account, b1.holder AS sender_holder,\n"
+                "       coalesce(r.amount, 0) AS amount, b2.account_number AS recipient_account, b2.holder AS recipient_holder\n"
+                "ORDER BY r.amount DESC LIMIT 25"
+            )
+        elif any(k in p_low for k in ["phone", "call", "caller", "dial"]):
+            return (
+                "MATCH (p1:Phone)-[r:CALLED]->(p2:Phone)\n"
+                "WHERE (p1.case_id IN $case_ids OR ANY(cid IN $case_ids WHERE cid IN coalesce(p1.case_ids, [])))\n"
+                "RETURN p1.number AS caller, coalesce(r.duration, 0) AS duration, p2.number AS receiver\n"
+                "LIMIT 25"
+            )
+        elif any(k in p_low for k in ["tower", "cell", "bts"]):
+            return (
+                "MATCH (p:Phone)-[r:PINGED_TOWER]->(t:CellTower)\n"
+                "WHERE (p.case_id IN $case_ids OR ANY(cid IN $case_ids WHERE cid IN coalesce(p.case_ids, [])))\n"
+                "RETURN p.number AS phone, t.tower_id AS tower_id, t.location AS location, r.pings_count AS pings\n"
+                "LIMIT 25"
+            )
+
         try:
-            llm = get_llm(num_predict=400, num_ctx=2048)
+            llm = get_llm(num_predict=150, num_ctx=1024)
             resp = llm.invoke(system_prompt)
             raw = resp.content if hasattr(resp, "content") else str(resp)
             clean = raw.replace("```cypher", "").replace("```", "").strip()
@@ -494,6 +538,34 @@ Cypher:"""
             return ""
 
         case_list_str = ", ".join([f"'{c}'" for c in case_ids])
+        p_low = prompt.lower()
+
+        # Fast direct query templates for standard investigative queries (avoids unnecessary LLM lag)
+        if tool_name == "POSTGRES_PROFILES":
+            name_match = re.search(r'(?:about|who is|find|search for)\s+([a-zA-Z\s]+)', prompt, re.IGNORECASE)
+            if name_match:
+                search_term = name_match.group(1).strip()
+                if search_term and len(search_term) > 2 and search_term.lower() not in ["the", "all", "suspects", "them", "suspect"]:
+                    return f"SELECT z_cluster_id, primary_name, risk_score, known_phones, known_accounts, known_aliases FROM golden_profiles WHERE case_id IN ({case_list_str}) AND (LOWER(primary_name) LIKE LOWER('%{search_term}%') OR known_aliases::text LIKE '%{search_term}%') ORDER BY risk_score DESC LIMIT 25"
+            return f"SELECT z_cluster_id, primary_name, risk_score, known_phones, known_accounts, known_aliases FROM golden_profiles WHERE case_id IN ({case_list_str}) ORDER BY risk_score DESC LIMIT 25"
+
+        elif tool_name == "POSTGRES_ANOMALIES":
+            if "critical" in p_low:
+                return f"SELECT finding_id, title, severity, unified_score, domain, entity_id, what_happened, status FROM anomaly_findings WHERE case_id IN ({case_list_str}) AND severity = 'CRITICAL' ORDER BY unified_score DESC LIMIT 25"
+            elif "high" in p_low:
+                return f"SELECT finding_id, title, severity, unified_score, domain, entity_id, what_happened, status FROM anomaly_findings WHERE case_id IN ({case_list_str}) AND severity IN ('CRITICAL', 'HIGH') ORDER BY unified_score DESC LIMIT 25"
+            return f"SELECT finding_id, title, severity, unified_score, domain, entity_id, what_happened, status FROM anomaly_findings WHERE case_id IN ({case_list_str}) ORDER BY unified_score DESC LIMIT 25"
+
+        elif tool_name == "POSTGRES_ALERTS":
+            if "critical" in p_low:
+                return f"SELECT alert_id, pattern_name, entity_name, risk_level, risk_score, status, evidence_narrative FROM investigation_alerts WHERE case_id IN ({case_list_str}) AND risk_level = 'CRITICAL' ORDER BY risk_score DESC LIMIT 25"
+            return f"SELECT alert_id, pattern_name, entity_name, risk_level, risk_score, status, evidence_narrative FROM investigation_alerts WHERE case_id IN ({case_list_str}) ORDER BY risk_score DESC LIMIT 25"
+
+        elif tool_name == "POSTGRES_EVIDENCE":
+            return f"SELECT evidence_id, original_filename, detected_source_type, processing_status, record_count, quality_score, received_at FROM evidence WHERE case_id IN ({case_list_str}) ORDER BY received_at DESC LIMIT 25"
+
+        elif tool_name == "POSTGRES_CASES":
+            return f"SELECT case_id, case_reference, title, status, sensitivity, created_at, created_by FROM cases ORDER BY created_at DESC LIMIT 25"
 
         system_prompt = f"""You are a PostgreSQL query expert for a forensics database.
 Translate the user's question into a single safe, read-only PostgreSQL SELECT query.
@@ -513,7 +585,7 @@ Question: {prompt}
 SQL:"""
 
         try:
-            llm = get_llm(num_predict=350, num_ctx=2048)
+            llm = get_llm(num_predict=150, num_ctx=1024)
             resp = llm.invoke(system_prompt)
             raw = resp.content if hasattr(resp, "content") else str(resp)
             clean = raw.replace("```sql", "").replace("```", "").strip()
@@ -880,7 +952,7 @@ INSTRUCTIONS:
 Forensic Response:"""
 
         try:
-            llm = get_llm(num_predict=500, num_ctx=2048)
+            llm = get_llm(num_predict=220, num_ctx=1536)
             resp = llm.invoke(synthesis_prompt)
             reply = resp.content if hasattr(resp, "content") else str(resp)
             return reply.strip()

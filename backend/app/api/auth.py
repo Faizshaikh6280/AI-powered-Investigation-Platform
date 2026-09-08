@@ -15,6 +15,7 @@ Handles:
 - DELETE /api/auth/sessions/{session_id}
 """
 
+import os
 import time
 import secrets
 import hashlib

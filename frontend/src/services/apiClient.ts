@@ -1760,12 +1760,31 @@ export const apiClient = {
     case_id?: string;
     history?: Array<{ role: string; content: string }>;
   }): Promise<ChatbotResponse> {
-    const res = await authFetch(`${API_BASE}/api/v1/chatbot/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    return handleResponse<ChatbotResponse>(res);
+    try {
+      const res = await authFetch(`${API_BASE}/api/v1/chatbot/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      return await handleResponse<ChatbotResponse>(res);
+    } catch (err: any) {
+      // Resilient failover: If Next.js proxy dropped socket or timed out, attempt direct backend connection
+      if (typeof window !== 'undefined' && !API_BASE) {
+        try {
+          const directUrl = `http://${window.location.hostname}:8000/api/v1/chatbot/chat`;
+          const directRes = await fetch(directUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify(payload)
+          });
+          return await handleResponse<ChatbotResponse>(directRes);
+        } catch {
+          // Fall through to throw original error
+        }
+      }
+      throw err;
+    }
   },
 
   async getChatHistory(caseId?: string): Promise<{ case_id: string | null; count: number; messages: any[] }> {

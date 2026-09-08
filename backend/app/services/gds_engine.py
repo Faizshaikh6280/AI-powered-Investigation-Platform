@@ -1,11 +1,21 @@
 import threading
 from typing import Dict, Any, List
-from graphdatascience import GraphDataScience
 from app.core.config import settings
+
+try:
+    from graphdatascience import GraphDataScience
+    _GDS_AVAILABLE = True
+except ImportError:
+    GraphDataScience = None  # type: ignore
+    _GDS_AVAILABLE = False
 
 _projection_lock = threading.Lock()
 
-def get_gds_client() -> GraphDataScience:
+def get_gds_client():
+    """Initialize and return the GraphDataScience client."""
+    if not _GDS_AVAILABLE:
+        raise RuntimeError("graphdatascience package is not installed. GDS features unavailable.")
+
     """Initialize and return the GraphDataScience client."""
     return GraphDataScience(
         settings.NEO4J_URI,

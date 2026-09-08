@@ -23,7 +23,8 @@ def get_llm(num_predict: int = 1500, num_ctx: int = 3584):
             temperature=0.0,
             num_ctx=min(num_ctx, 4096),
             num_predict=num_predict,
-            keep_alive="24h"
+            keep_alive="24h",
+            client_kwargs={"timeout": 25.0}
         )
     else:
         # Google Gemini fallback
