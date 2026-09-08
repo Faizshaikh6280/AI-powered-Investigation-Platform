@@ -42,6 +42,12 @@ class CaseResponse(BaseModel):
     created_at: str
     created_by: str
 
+class CaseUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+
+
 @router.post("", response_model=CaseResponse)
 def create_case(
     payload: CaseCreateRequest,
@@ -261,6 +267,77 @@ def get_case_details(
             "records": e.record_count,
             "quality_score": e.quality_score,
             "sha256": e.sha256
+        } for e in evidence_items]
+    }
+
+@router.put("/{case_id}")
+def update_case(
+    case_id: str,
+    payload: CaseUpdateRequest,
+    request: Request,
+    current_user: UserModel = Depends(require_case_access(Permissions.CASE_UPDATE)),
+    db: Session = Depends(get_db)
+):
+    """Updates mutable metadata (title, description, status) of an investigation case."""
+    case = db.query(CaseModel).filter_by(case_id=case_id).first()
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    if payload.title is not None:
+        case.title = payload.title
+    if payload.description is not None:
+        case.description = payload.description
+    if payload.status is not None:
+        case.status = payload.status
+
+    db.commit()
+    db.refresh(case)
+
+    record_audit_event(
+        action=AuditAction.CASE_UPDATED,
+        result="SUCCESS",
+        user_id=current_user.id,
+        actor=current_user.official_email,
+        role=current_user.role.name if current_user.role else None,
+        case_id=case_id,
+        details={"updated_fields": payload.dict(exclude_unset=True)},
+        ip_address=get_client_ip(request),
+        db=db
+    )
+
+    return {
+        "status": "success",
+        "case_id": case.case_id,
+        "title": case.title,
+        "description": case.description,
+        "case_status": case.status
+    }
+
+@router.get("/{case_id}/evidence")
+def list_case_evidence(
+    case_id: str,
+    db: Session = Depends(get_db),
+    current_user: Optional[UserModel] = Depends(get_current_user)
+):
+    case = db.query(CaseModel).filter_by(case_id=case_id).first()
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    evidence_items = db.query(EvidenceModel).filter_by(case_id=case_id).order_by(EvidenceModel.received_at.desc()).all()
+    return {
+        "case_id": case.case_id,
+        "case_reference": case.case_reference,
+        "evidence_count": len(evidence_items),
+        "evidence": [{
+            "evidence_id": e.evidence_id,
+            "filename": e.original_filename,
+            "source_type": e.detected_source_type,
+            "confidence": e.detected_source_confidence or 0.0,
+            "status": e.processing_status,
+            "records": e.record_count or 0,
+            "quality_score": (e.quality_score / 100.0) if (e.quality_score and e.quality_score > 1.0) else (e.quality_score or 1.0),
+            "sha256": e.sha256,
+            "ingested_at": e.received_at.isoformat() if e.received_at else ""
         } for e in evidence_items]
     }
 

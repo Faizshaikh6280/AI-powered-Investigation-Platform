@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   Users, Smartphone, Building, Laptop, Globe, Search, Filter, 
   Layers, Settings, Download, ZoomIn, ZoomOut, Maximize,
@@ -27,7 +27,7 @@ try {
 }
 
 // Map types to icons/colors
-const getTypeConfig = (type: string) => {
+export const getTypeConfig = (type: string) => {
   const configs: Record<string, { icon: any, color: string, iconStr: string }> = {
     Person: { icon: UserRound, color: '#ef4444', iconStr: '<circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/>' },
     Phone: { icon: Phone, color: '#0ea5e9', iconStr: '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>' },
@@ -47,7 +47,7 @@ const getTypeConfig = (type: string) => {
 };
 
 // SVG Icon generator for cytoscape background - Use base64 to ensure broad browser compatibility and no XML parsing issues
-const getSvgDataUri = (type: string) => {
+export const getSvgDataUri = (type: string) => {
   const config = getTypeConfig(type);
   // Padded viewBox to absolutely guarantee that thick strokes never clip at the SVG edge boundary
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="-2 -2 28 28" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${config.iconStr}</svg>`;
@@ -55,32 +55,36 @@ const getSvgDataUri = (type: string) => {
 };
 
 // Drawer Component
-const Drawer = ({ isOpen, onClose, title, children, width = 'w-full sm:w-96 max-w-full' }: any) => (
-  <>
-    {isOpen && (
-      <div 
-        className="fixed inset-0 bg-black/60 backdrop-blur-xs z-20 sm:hidden animate-in fade-in duration-150"
-        onClick={onClose}
-      />
-    )}
-    <div className={cn(
-      "absolute top-0 right-0 bottom-0 bg-background border-l border-border shadow-2xl z-30 transition-transform duration-300 ease-in-out flex flex-col",
-      width, isOpen ? "translate-x-0" : "translate-x-full"
-    )}>
-      <div className="flex items-center justify-between p-4 border-b border-border bg-card sticky top-0 z-10">
-        <h3 className="font-semibold text-foreground flex items-center gap-2">{title}</h3>
-        <button onClick={onClose} className="p-1.5 text-muted-foreground hover:text-foreground rounded-md hover:bg-secondary transition-colors">
-          <X className="w-4 h-4" />
-        </button>
-      </div>
-      <div className="flex-1 overflow-y-auto p-0 bg-background">
-        {children}
-      </div>
+const Drawer = ({ isOpen, onClose, title, children, width = 'w-96' }: any) => (
+  <div className={cn(
+    "absolute top-0 right-0 bottom-0 bg-background border-l border-border shadow-2xl z-20 transition-transform duration-300 ease-in-out flex flex-col",
+    width, isOpen ? "translate-x-0" : "translate-x-full"
+  )}>
+    <div className="flex items-center justify-between p-4 border-b border-border bg-card sticky top-0 z-10">
+      <h3 className="font-semibold text-foreground flex items-center gap-2">{title}</h3>
+      <button onClick={onClose} className="p-1.5 text-muted-foreground hover:text-foreground rounded-md hover:bg-secondary transition-colors">
+        <X className="w-4 h-4" />
+      </button>
     </div>
-  </>
+    <div className="flex-1 overflow-y-auto p-0 bg-background">
+      {children}
+    </div>
+  </div>
 );
 
-export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?: string | null }) {
+export interface GraphTopologyViewerProps {
+  focusEntityId?: string | null;
+  focusEntityIds?: string[] | null;
+  focusCommunityId?: number | string | null;
+  onClearFocus?: () => void;
+}
+
+export default function GraphTopologyViewer({ 
+  focusEntityId,
+  focusEntityIds,
+  focusCommunityId,
+  onClearFocus
+}: GraphTopologyViewerProps) {
   const { activeCase } = useCase();
   const { resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
@@ -107,6 +111,7 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
   
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<any>(null);
+  const pendingFocusRef = useRef<{ targetId?: string | null, targetIds?: string[] | null, communityId?: any } | null>(null);
 
   // Computed colors based on theme
   const canvasBg = isDark ? '#020617' : '#f8fafc'; // slightly darker canvas for better contrast in dark mode
@@ -256,17 +261,19 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
         style: {
           'border-color': hlColor,
           'border-width': 4,
-          'width': 58,
-          'height': 58,
-          'shadow-blur': 20,
+          'width': 60,
+          'height': 60,
+          'shadow-blur': 25,
           'shadow-color': hlColor,
-          'shadow-opacity': 0.5
+          'shadow-opacity': 0.8,
+          'opacity': 1,
+          'z-index': 9999
         }
       },
       {
         selector: 'node.dimmed',
         style: {
-          'opacity': 0.15,
+          'opacity': 0.12,
           'label': '' // hide labels of dimmed nodes for clarity
         }
       },
@@ -275,10 +282,11 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
         style: {
           'line-color': hlColor,
           'target-arrow-color': hlColor,
-          'width': 2.5,
+          'width': 3.5,
           'label': 'data(label)',
+          'opacity': 1,
           'text-background-opacity': 0.95,
-          'text-background-padding': '3px',
+          'text-background-padding': '4px',
           'text-border-width': 1,
           'z-index': 999
         }
@@ -286,7 +294,7 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
       {
         selector: 'edge.dimmed',
         style: {
-          'opacity': 0.1
+          'opacity': 0.08
         }
       }
     ];
@@ -457,7 +465,12 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
 
     cyRef.current.on('layoutstop', () => {
       try {
-        cyRef.current?.fit(undefined, 80);
+        const pending = pendingFocusRef.current;
+        if (pending && (pending.targetId || pending.targetIds || (pending.communityId !== null && pending.communityId !== undefined))) {
+          applyFocusToGraph(pending.targetId || null, pending.targetIds || null, pending.communityId);
+        } else if (!focusEntityId && !focusEntityIds && focusCommunityId === null) {
+          cyRef.current?.fit(undefined, 80);
+        }
       } catch (err) {
         // Safe recovery
       }
@@ -467,9 +480,10 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
       const node = evt.target;
       const connectedEdges = node.connectedEdges();
       const connectedNodes = connectedEdges.connectedNodes();
+      const neighborhood = node.union(connectedNodes).union(connectedEdges);
       
       cyRef.current.elements().removeClass('highlighted dimmed');
-      cyRef.current.elements().not(node).not(connectedNodes).not(connectedEdges).addClass('dimmed');
+      cyRef.current.elements().not(neighborhood).addClass('dimmed');
       
       node.addClass('highlighted');
       connectedNodes.addClass('highlighted');
@@ -480,8 +494,9 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
       setActiveDrawer('node');
       
       cyRef.current.animate({
-        center: { eles: node },
-        duration: 300
+        fit: { eles: neighborhood, padding: 90 },
+        duration: 500,
+        easing: 'ease-out'
       });
     });
 
@@ -511,62 +526,160 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
 
   }, [graphData, layoutName, activeFilters, searchQuery]); // Removed isDark to prevent destroy/recreate on theme switch
 
-  useEffect(() => {
-    if (focusEntityId && cyRef.current) {
-      setActiveFocusId(focusEntityId);
-      let node = cyRef.current.getElementById(focusEntityId);
-      if (!node || node.length === 0) {
-        node = cyRef.current.nodes().filter((n: any) => {
-          const d = n.data();
-          const props = d.properties || {};
-          return d.label === focusEntityId ||
-                 d.id === focusEntityId ||
-                 props.golden_id === focusEntityId ||
-                 props.number === focusEntityId ||
-                 props.account_number === focusEntityId ||
-                 props.handle === focusEntityId;
-        });
-      }
-      if (node && node.length > 0) {
-        cyRef.current.elements().removeClass('highlighted dimmed');
-        const targetNode = node[0];
-        const connectedEdges = targetNode.connectedEdges();
-        const connectedNodes = connectedEdges.connectedNodes();
+  const applyFocusToGraph = useCallback((targetId: string | null, targetIds: string[] | null, communityId: any) => {
+    if (!cyRef.current) return;
+    const cy = cyRef.current;
+
+    // 1. Focus by Community ID
+    if (communityId !== null && communityId !== undefined) {
+      const commStr = String(communityId);
+      setActiveFocusId(`Syndicate #${commStr}`);
+      
+      const commNodes = cy.nodes().filter((n: any) => {
+        const props = n.data('properties') || {};
+        return String(props.communityId) === commStr;
+      });
+
+      if (commNodes.length > 0) {
+        cy.elements().removeClass('highlighted dimmed');
+        const commEdges = commNodes.edgesWith(commNodes);
         
         // Dim all unrelated nodes and edges
-        cyRef.current.elements().not(targetNode).not(connectedNodes).not(connectedEdges).addClass('dimmed');
-        targetNode.addClass('highlighted');
-        
-        // Sequential path animation along connected edges
-        connectedEdges.forEach((edge: any, idx: number) => {
-          setTimeout(() => {
-            if (cyRef.current) {
-              edge.addClass('highlighted');
-            }
-          }, idx * 120);
-        });
+        cy.elements().not(commNodes).not(commEdges).addClass('dimmed');
+        commNodes.addClass('highlighted');
+        commEdges.addClass('highlighted');
 
-        connectedNodes.forEach((n: any, idx: number) => {
-          setTimeout(() => {
-            if (cyRef.current) {
-              n.addClass('highlighted');
-            }
-          }, idx * 120 + 80);
-        });
-        
-        cyRef.current.animate({
-          zoom: 1.4,
-          center: { eles: targetNode },
+        cy.animate({
+          fit: { eles: commNodes, padding: 80 },
           duration: 900,
           easing: 'ease-in-out'
         });
+        pendingFocusRef.current = null;
+      }
+      return;
+    }
 
-        // Set selected node to open drawer
+    // 2. Focus by Multiple Entity IDs
+    if (targetIds && targetIds.length > 0) {
+      const idSet = new Set(targetIds.map(i => String(i).toLowerCase().trim()));
+      setActiveFocusId(`${targetIds.length} Entities`);
+      
+      const matchedNodes = cy.nodes().filter((n: any) => {
+        const d = n.data();
+        const props = d.properties || {};
+        const check = (val: any) => {
+          if (!val) return false;
+          const s = String(val).toLowerCase().trim();
+          return idSet.has(s) || Array.from(idSet).some(id => s.includes(id) || id.includes(s));
+        };
+        return check(d.id) ||
+               check(d.label) ||
+               check(props.golden_id) ||
+               check(props.number) ||
+               check(props.account_number) ||
+               check(props.handle) ||
+               check(props.name);
+      });
+
+      if (matchedNodes.length > 0) {
+        cy.elements().removeClass('highlighted dimmed');
+        const connectedEdges = matchedNodes.connectedEdges();
+        const connectedNeighbors = connectedEdges.connectedNodes();
+        const neighborhood = matchedNodes.union(connectedNeighbors).union(connectedEdges);
+
+        cy.elements().not(neighborhood).addClass('dimmed');
+        matchedNodes.addClass('highlighted');
+        connectedNeighbors.addClass('highlighted');
+        connectedEdges.addClass('highlighted');
+
+        cy.animate({
+          fit: { eles: neighborhood, padding: 80 },
+          duration: 800,
+          easing: 'ease-in-out'
+        });
+        pendingFocusRef.current = null;
+      }
+      return;
+    }
+
+    // 3. Focus by Single Entity ID (Pivot to Graph Visualizer)
+    if (targetId) {
+      setActiveFocusId(targetId);
+      let node = cy.getElementById(targetId);
+      if (!node || node.length === 0) {
+        const targetStr = String(targetId).toLowerCase().trim();
+        const targetClean = targetStr.replace(/[^a-z0-9]/g, '');
+
+        node = cy.nodes().filter((n: any) => {
+          const d = n.data();
+          const props = d.properties || {};
+          const check = (val: any) => {
+            if (!val) return false;
+            const s = String(val).toLowerCase().trim();
+            const sClean = s.replace(/[^a-z0-9]/g, '');
+            return s === targetStr || 
+                   (targetClean.length >= 3 && sClean.includes(targetClean)) || 
+                   (sClean.length >= 3 && targetClean.includes(sClean)) ||
+                   s.includes(targetStr) || 
+                   targetStr.includes(s);
+          };
+          return check(d.label) ||
+                 check(d.id) ||
+                 check(props.name) ||
+                 check(props.golden_id) ||
+                 check(props.z_cluster_id) ||
+                 check(props.number) ||
+                 check(props.phone) ||
+                 check(props.account_number) ||
+                 check(props.account) ||
+                 check(props.holder) ||
+                 check(props.handle) ||
+                 check(props.tower_id) ||
+                 check(props.address);
+        });
+      }
+
+      if (node && node.length > 0) {
+        cy.elements().removeClass('highlighted dimmed');
+        const targetNode = node[0];
+        const connectedEdges = targetNode.connectedEdges();
+        const connectedNodes = connectedEdges.connectedNodes();
+        const neighborhood = targetNode.union(connectedNodes).union(connectedEdges);
+
+        // Dim everything outside the 1-hop neighborhood
+        cy.elements().not(neighborhood).addClass('dimmed');
+
+        // Prominently highlight target node, all connecting edges, and all 1-hop neighbor nodes
+        targetNode.addClass('highlighted');
+        connectedNodes.addClass('highlighted');
+        connectedEdges.addClass('highlighted');
+
+        // Smooth camera viewport framing to encompass the complete connected neighborhood
+        cy.animate({
+          fit: { eles: neighborhood, padding: 85 },
+          duration: 800,
+          easing: 'ease-in-out'
+        });
+
+        // Set selected node to open drawer inspector
         setSelectedNode(targetNode.data());
         setActiveDrawer('node');
+        pendingFocusRef.current = null;
       }
     }
-  }, [focusEntityId, graphData]);
+  }, []);
+
+  useEffect(() => {
+    pendingFocusRef.current = {
+      targetId: focusEntityId || null,
+      targetIds: focusEntityIds || null,
+      communityId: focusCommunityId !== undefined ? focusCommunityId : null
+    };
+
+    if (cyRef.current && (focusEntityId || focusEntityIds || (focusCommunityId !== null && focusCommunityId !== undefined))) {
+      applyFocusToGraph(focusEntityId || null, focusEntityIds || null, focusCommunityId);
+    }
+  }, [focusEntityId, focusEntityIds, focusCommunityId, graphData, applyFocusToGraph]);
 
   const toggleDrawer = (drawer: string) => {
     setActiveDrawer(activeDrawer === drawer ? null : drawer);
@@ -626,6 +739,7 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
             <button
               onClick={() => {
                 setActiveFocusId(null);
+                onClearFocus?.();
                 if (cyRef.current) {
                   cyRef.current.elements().removeClass('highlighted dimmed');
                   cyRef.current.animate({ fit: { padding: 50 }, duration: 500 });
@@ -639,18 +753,18 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
         )}
 
         {/* Floating Top Toolbar */}
-        <div className="absolute top-3 sm:top-4 left-2 sm:left-4 right-2 sm:right-auto max-w-[calc(100vw-1rem)] sm:max-w-none overflow-x-auto scrollbar-hide touch-scroll flex items-center gap-1 p-1 sm:p-1.5 bg-card/90 backdrop-blur-md border border-border rounded-xl shadow-lg z-10 transition-all">
-          <div className="relative flex items-center border-r border-border pr-1.5 sm:pr-2 shrink-0">
-            <Search className="w-3.5 h-3.5 text-muted-foreground absolute left-2.5 sm:left-3" />
+        <div className="absolute top-4 left-4 flex items-center gap-1 p-1.5 bg-card/80 backdrop-blur-md border border-border rounded-xl shadow-lg z-10 transition-all">
+          <div className="relative flex items-center border-r border-border pr-2">
+            <Search className="w-4 h-4 text-muted-foreground absolute left-3" />
             <input 
               type="text" 
-              placeholder="Search..." 
+              placeholder="Search entities, IMEI..." 
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="bg-transparent border-none outline-none text-xs sm:text-sm text-foreground pl-8 sm:pl-9 pr-2 sm:pr-3 py-1 sm:py-1.5 w-24 xs:w-36 sm:w-48 focus:w-36 xs:focus:w-48 sm:focus:w-64 transition-all"
+              className="bg-transparent border-none outline-none text-sm text-foreground pl-9 pr-3 py-1.5 w-48 focus:w-64 transition-all"
             />
             {searchQuery && (
-              <button onClick={() => setSearchQuery('')} className="text-muted-foreground hover:text-foreground mr-1">
+              <button onClick={() => setSearchQuery('')} className="absolute right-3 text-muted-foreground hover:text-foreground">
                 <X className="w-3 h-3" />
               </button>
             )}
@@ -658,52 +772,49 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
           
           <button 
             onClick={() => toggleDrawer('filters')}
-            className={cn("px-2.5 sm:px-3 py-1 sm:py-1.5 text-xs sm:text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5 shrink-0", 
+            className={cn("px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 ml-1", 
               activeDrawer === 'filters' ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary"
             )}
           >
-            <Filter className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            <span className="hidden xs:inline">Filters</span>
+            <Filter className="w-4 h-4" /> Filters
           </button>
           
           <button 
             onClick={() => toggleDrawer('layout')}
-            className={cn("px-2.5 sm:px-3 py-1 sm:py-1.5 text-xs sm:text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5 shrink-0", 
+            className={cn("px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-2", 
               activeDrawer === 'layout' ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary"
             )}
           >
-            <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            <span className="hidden xs:inline">Layout</span>
+            <Layers className="w-4 h-4" /> Layout
           </button>
 
           <button 
             onClick={() => setShowEdgeLabels(prev => !prev)}
-            className={cn("px-2.5 sm:px-3 py-1 sm:py-1.5 text-xs sm:text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5 shrink-0", 
+            className={cn("px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-2", 
               showEdgeLabels ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary"
             )}
             title="Toggle Edge Relationship Labels"
           >
-            <Tag className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            <span className="hidden sm:inline">Edge Labels</span>
+            <Tag className="w-4 h-4" /> Edge Labels
           </button>
 
           <button 
             onClick={handleSyncGraph}
             disabled={isSyncing}
-            className="px-2.5 sm:px-3 py-1 sm:py-1.5 text-[11px] sm:text-xs font-semibold rounded-lg bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 transition-colors flex items-center gap-1.5 shrink-0 disabled:opacity-50"
+            className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 transition-colors flex items-center gap-1.5 ml-1 disabled:opacity-50"
             title="Rebuild & Synchronize Graph with Neo4j and Canonical Events"
           >
             <RefreshCw className={cn("w-3.5 h-3.5", isSyncing && "animate-spin")} />
-            <span className="hidden sm:inline">{isSyncing ? "Syncing..." : "Sync Graph"}</span>
+            {isSyncing ? "Syncing..." : "Sync Graph"}
           </button>
 
           <button 
             onClick={fetchData}
             disabled={loading}
-            className="px-2 sm:px-3 py-1 sm:py-1.5 text-xs sm:text-sm font-medium rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors flex items-center gap-1.5 border-l border-border pl-2 sm:pl-3 shrink-0 disabled:opacity-50"
+            className="px-3 py-1.5 text-sm font-medium rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors flex items-center gap-2 border-l border-border ml-1 pl-3 disabled:opacity-50"
             title="Refresh Data"
           >
-            <RefreshCcw className={cn("w-3.5 h-3.5 sm:w-4 sm:h-4", loading && "animate-spin")} />
+            <RefreshCcw className={cn("w-4 h-4", loading && "animate-spin")} />
           </button>
         </div>
 
@@ -748,11 +859,11 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
         </div>
 
         {/* Cytoscape Container */}
-        <div ref={containerRef} className="absolute inset-0 z-0 touch-none" />
+        <div ref={containerRef} className="absolute inset-0 z-0" />
       </div>
 
       {/* Filter Drawer */}
-      <Drawer isOpen={activeDrawer === 'filters'} onClose={() => setActiveDrawer(null)} title={<><Filter className="w-4 h-4"/> Entity Filters</>} width="w-full sm:w-80 max-w-full">
+      <Drawer isOpen={activeDrawer === 'filters'} onClose={() => setActiveDrawer(null)} title={<><Filter className="w-4 h-4"/> Entity Filters</>} width="w-80">
         <div className="p-5 space-y-6">
           <div>
             <div className="space-y-2">
@@ -795,7 +906,7 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
       </Drawer>
 
       {/* Layout Drawer */}
-      <Drawer isOpen={activeDrawer === 'layout'} onClose={() => setActiveDrawer(null)} title={<><Layers className="w-4 h-4"/> Graph Layout</>} width="w-full sm:w-80 max-w-full">
+      <Drawer isOpen={activeDrawer === 'layout'} onClose={() => setActiveDrawer(null)} title={<><Layers className="w-4 h-4"/> Graph Layout</>} width="w-80">
         <div className="p-5 space-y-3">
           {[
             { id: 'fcose', name: 'Force Directed', desc: 'Prioritizes extreme spacing and natural clusters.' },
@@ -822,7 +933,7 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
       </Drawer>
 
       {/* Node Details Drawer */}
-      <Drawer isOpen={activeDrawer === 'node'} onClose={() => {setActiveDrawer(null); setSelectedNode(null);}} title={<><FileText className="w-4 h-4"/> Entity Profile</>} width="w-full sm:w-96 max-w-full">
+      <Drawer isOpen={activeDrawer === 'node'} onClose={() => {setActiveDrawer(null); setSelectedNode(null);}} title={<><FileText className="w-4 h-4"/> Entity Profile</>} width="w-96">
         {selectedNode ? (
           <div className="flex flex-col h-full">
             <div className="p-6 bg-card border-b border-border shadow-sm z-10 relative">
@@ -918,7 +1029,7 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
       </Drawer>
 
       {/* Edge Details Drawer */}
-      <Drawer isOpen={activeDrawer === 'edge'} onClose={() => {setActiveDrawer(null); setSelectedEdge(null);}} title={<><Share2 className="w-4 h-4"/> Relationship Profile</>} width="w-full sm:w-96 max-w-full">
+      <Drawer isOpen={activeDrawer === 'edge'} onClose={() => {setActiveDrawer(null); setSelectedEdge(null);}} title={<><Share2 className="w-4 h-4"/> Relationship Profile</>} width="w-96">
         {selectedEdge ? (
           <div className="flex flex-col h-full">
             <div className="p-6 bg-card border-b border-border shadow-sm relative z-10">

@@ -87,7 +87,7 @@ class Neo4jClient:
             return
         self._schema_initialized = True
         statements = [
-            "CREATE CONSTRAINT IF NOT EXISTS FOR (p:Person) REQUIRE p.golden_id IS UNIQUE",
+            "CREATE INDEX IF NOT EXISTS FOR (p:Person) ON (p.case_id, p.golden_id)",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (ph:Phone) REQUIRE ph.number IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (b:BankAccount) REQUIRE b.account_number IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (i:IPAddress) REQUIRE i.address IS UNIQUE",

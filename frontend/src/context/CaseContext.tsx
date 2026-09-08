@@ -11,7 +11,9 @@ interface CaseContextType {
   error: string | null;
   setActiveCaseId: (id: string) => void;
   refreshCases: () => Promise<void>;
+  refreshActiveCaseDetail: () => Promise<void>;
   createCase: (payload: CaseCreatePayload) => Promise<Case>;
+  updateCase: (id: string, payload: { title?: string; description?: string; status?: string; case_reference?: string }) => Promise<Case>;
   deleteCase: (id: string) => Promise<void>;
   deleteAllCases: () => Promise<void>;
 }
@@ -87,18 +89,28 @@ export function CaseProvider({ children }: { children: ReactNode }) {
     fetchCases();
   }, [fetchCases]);
 
-  // Load detailed case info whenever activeCaseId changes
-  useEffect(() => {
+  const refreshActiveCaseDetail = useCallback(async () => {
     if (!activeCaseId) {
       setActiveCaseDetail(null);
       return;
     }
-    apiClient.getCaseDetails(activeCaseId)
-      .then(detail => setActiveCaseDetail(detail))
-      .catch(err => {
-        console.warn(`Could not load details for case ${activeCaseId}:`, err);
-      });
+    try {
+      const detail = await apiClient.getCaseDetails(activeCaseId);
+      setActiveCaseDetail(detail);
+    } catch (err) {
+      console.warn(`Could not load details for case ${activeCaseId}:`, err);
+    }
   }, [activeCaseId]);
+
+  // Load detailed case info whenever activeCaseId changes
+  useEffect(() => {
+    refreshActiveCaseDetail();
+  }, [activeCaseId, refreshActiveCaseDetail]);
+
+  const refreshAll = useCallback(async () => {
+    await fetchCases();
+    await refreshActiveCaseDetail();
+  }, [fetchCases, refreshActiveCaseDetail]);
 
   const setActiveCaseId = useCallback((id: string) => {
     setActiveCaseIdState(id);
@@ -110,6 +122,18 @@ export function CaseProvider({ children }: { children: ReactNode }) {
     setActiveCaseIdState(newCase.case_id);
     return newCase;
   }, [fetchCases]);
+
+  const updateCase = useCallback(async (id: string, payload: { title?: string; description?: string; status?: string; case_reference?: string }): Promise<Case> => {
+    const updated = await apiClient.updateCase(id, payload);
+    await fetchCases();
+    if (activeCaseId === id) {
+      try {
+        const detail = await apiClient.getCaseDetails(id);
+        setActiveCaseDetail(detail);
+      } catch (err) {}
+    }
+    return updated;
+  }, [fetchCases, activeCaseId]);
 
   const deleteCase = useCallback(async (id: string): Promise<void> => {
     await apiClient.deleteCase(id);
@@ -132,8 +156,10 @@ export function CaseProvider({ children }: { children: ReactNode }) {
         isLoading,
         error,
         setActiveCaseId,
-        refreshCases: fetchCases,
+        refreshCases: refreshAll,
+        refreshActiveCaseDetail,
         createCase,
+        updateCase,
         deleteCase,
         deleteAllCases,
       }}

@@ -7,6 +7,7 @@ from typing import List, Dict, Any
 from app.schemas.canonical_event import (
     CanonicalEvent, CanonicalEntities, CanonicalTelemetry, CanonicalFinancial, EventProvenance
 )
+from app.ingestion.synonyms import extract_canonical_fields, clean_name
 from app.ingestion.parsers.base import BaseParser
 
 class GenericTabularParser(BaseParser):
@@ -63,18 +64,24 @@ class GenericTabularParser(BaseParser):
             rows = list(reader)
 
         for idx, row in enumerate(rows, start=1):
-            name = None
-            phone = None
-            account = None
+            canon = extract_canonical_fields(row)
+            name = canon["name"]
+            phone = self.clean_phone(canon["phone"])
+            national_id = canon["national_id"]
+            email = canon["email"]
+            account = canon["account"]
+            addr = canon["address"]
+            device_id = canon["device_id"]
+            handle = canon["social_handle"]
+            aliases = canon["aliases"]
+
             amount = 0.0
             ip = None
             lat = None
             lng = None
-            addr = None
             cell_id = None
             timestamp = None
-            imei = None
-            device_id = None
+            imei = device_id
 
             for k, v in row.items():
                 if v is None:
@@ -83,7 +90,7 @@ class GenericTabularParser(BaseParser):
                 vs = str(v).strip()
 
                 if not name and any(x in kl for x in ("name", "user", "subscriber", "holder", "entity", "person")):
-                    name = vs
+                    name = clean_name(vs)
                 elif not phone and any(x in kl for x in ("phone", "mobile", "caller", "callee", "contact", "number")) and re.search(r'\d{8,}', vs):
                     phone = self.clean_phone(vs)
                 elif not account and any(x in kl for x in ("account", "acc_no", "acc_num", "iban")):
@@ -111,11 +118,14 @@ class GenericTabularParser(BaseParser):
 
             entities = CanonicalEntities(
                 name=name,
-                phone=phone
+                phone=phone,
+                national_id=national_id,
+                email=email,
+                social_handle=handle
             )
 
             telemetry = CanonicalTelemetry(
-                imei=imei,
+                imei=imei or device_id,
                 assigned_ip=ip,
                 cell_tower_id=cell_id,
                 lat=lat if lat and lat != 0.0 else None,
@@ -133,6 +143,9 @@ class GenericTabularParser(BaseParser):
                 attributes["imei"] = imei
             if device_id:
                 attributes["device_id"] = device_id
+            if aliases:
+                attributes["known_aliases"] = aliases
+
 
             provenance = EventProvenance(
                 evidence_id=evidence_id,

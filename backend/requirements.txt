@@ -30,6 +30,7 @@ pyarrow>=14.0.0
 # Document & Spreadsheet Parsers
 openpyxl>=3.1.2
 pypdf>=4.0.0
+reportlab>=5.0.1
 
 # Graph-RAG & Agentic GDS
 langchain-google-genai>=1.0.3

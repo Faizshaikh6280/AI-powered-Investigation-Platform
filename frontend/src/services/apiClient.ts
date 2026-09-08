@@ -880,13 +880,14 @@ export const apiClient = {
     return handleResponse<any>(res);
   },
 
-  async getGraphTopology(caseId?: string): Promise<GraphTopology> {
-    const key = `graph_topology_${caseId || 'default'}`;
+  async getGraphTopology(caseId?: string, communityId?: number | string): Promise<GraphTopology> {
+    const key = `graph_topology_${caseId || 'default'}_${communityId ?? 'all'}`;
     return cachedFetch<GraphTopology>(key, 10000, async () => {
       try {
-        const url = caseId 
-          ? `${API_BASE}/api/graph/topology?case_id=${encodeURIComponent(caseId)}`
-          : `${API_BASE}/api/graph/topology`;
+        const searchParams = new URLSearchParams();
+        if (caseId) searchParams.append('case_id', caseId);
+        if (communityId !== undefined && communityId !== null) searchParams.append('community_id', String(communityId));
+        const url = `${API_BASE}/api/graph/topology?${searchParams.toString()}`;
         const res = await authFetch(url);
         return await handleResponse<GraphTopology>(res);
       } catch (err) {
@@ -1633,6 +1634,222 @@ export const apiClient = {
       body: JSON.stringify({ new_pin: newPin }),
     });
     return handleResponse<any>(res);
+  },
+
+  // === CASE MANAGEMENT & EXTRA UTILITIES ===
+  async signup(payload: {
+    full_name: string;
+    official_email: string;
+    password: string;
+    employee_id?: string;
+    role_name?: string;
+    phone_number?: string;
+    unit_code?: string;
+  }): Promise<AuthStateResponse> {
+    _apiCache.clear();
+    const res = await authFetch(`${API_BASE}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return handleResponse<AuthStateResponse>(res);
+  },
+
+
+  async updateCase(caseId: string, payload: { title?: string; description?: string; status?: string; case_reference?: string }): Promise<Case> {
+    _apiCache.delete('list_cases');
+    _apiCache.delete(`case_detail_${caseId}`);
+    const res = await authFetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return handleResponse<Case>(res);
+  },
+
+
+  async getCaseEvidence(caseId: string): Promise<{ case_id: string; case_reference: string; evidence_count: number; evidence: EvidenceItem[] }> {
+    _apiCache.delete(`case_evidence_${caseId}`);
+    const res = await authFetch(`${API_BASE}/api/cases/${encodeURIComponent(caseId)}/evidence`);
+    return handleResponse<{ case_id: string; case_reference: string; evidence_count: number; evidence: EvidenceItem[] }>(res);
+  },
+
+  // === AUTOMATED CEP ALERTS (FEATURE 8) ===
+  async evaluateAlerts(caseId?: string): Promise<{ status: string; count: number; alerts: CEPAlert[] }> {
+    const url = caseId 
+      ? `${API_BASE}/api/v1/alerts/evaluate?case_id=${encodeURIComponent(caseId)}`
+      : `${API_BASE}/api/v1/alerts/evaluate`;
+    const res = await authFetch(url, { method: 'POST' });
+    return handleResponse<any>(res);
+  },
+
+  async getAlerts(caseId?: string, status?: string, riskLevel?: string): Promise<{ case_id: string; total: number; alerts: CEPAlert[] }> {
+    const params = new URLSearchParams();
+    if (caseId) params.append('case_id', caseId);
+    if (status && status !== 'ALL') params.append('status', status);
+    if (riskLevel && riskLevel !== 'ALL') params.append('risk_level', riskLevel);
+    const url = `${API_BASE}/api/v1/alerts${params.toString() ? `?${params.toString()}` : ''}`;
+    const res = await authFetch(url);
+    return handleResponse<any>(res);
+  },
+
+  async triageAlert(alertId: string, status: string, notes?: string): Promise<any> {
+    const res = await authFetch(`${API_BASE}/api/v1/alerts/${encodeURIComponent(alertId)}/triage`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, notes })
+    });
+    return handleResponse<any>(res);
+  },
+
+  // === ADVANCED OMNI-SEARCH & NL QUERY (FEATURE 9) ===
+  async omniSearch(payload: {
+    query: string;
+    case_id?: string;
+    match_mode?: 'all' | 'exact' | 'fuzzy';
+    mode?: 'all' | 'exact' | 'fuzzy';
+    filters?: Record<string, any>;
+    min_confidence?: number;
+    time_buffer_mins?: number;
+    temporal_anchor?: string;
+    min_risk?: number;
+    min_degree?: number;
+  }): Promise<OmniSearchResponse> {
+    const formattedPayload = {
+      query: payload.query,
+      case_id: payload.case_id,
+      match_mode: payload.match_mode || payload.mode || 'exact',
+      filters: payload.filters || {
+        min_confidence: payload.min_confidence,
+        time_window_mins: payload.time_buffer_mins,
+        min_risk_score: payload.min_risk,
+        min_degree: payload.min_degree
+      }
+    };
+    const res = await authFetch(`${API_BASE}/api/v1/search/omni`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(formattedPayload)
+    });
+    return handleResponse<OmniSearchResponse>(res);
+  },
+
+  async nlQuery(payload: {
+    prompt: string;
+    case_id?: string;
+  }): Promise<NLQueryResponse> {
+    const res = await authFetch(`${API_BASE}/api/v1/search/nl-query`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return handleResponse<NLQueryResponse>(res);
+  },
+
+  async getSearchHistory(caseId?: string, limit: number = 10): Promise<{ history: SearchHistoryItem[] }> {
+    const params = new URLSearchParams();
+    if (caseId) params.append('case_id', caseId);
+    params.append('limit', limit.toString());
+    const res = await authFetch(`${API_BASE}/api/v1/search/history?${params.toString()}`);
+    return handleResponse<any>(res);
+  },
+
+  // === AI FORENSIC CHATBOT (VOICE + TEXT) ===
+  async sendChatMessage(payload: {
+    message: string;
+    case_id?: string;
+    history?: Array<{ role: string; content: string }>;
+  }): Promise<ChatbotResponse> {
+    const res = await authFetch(`${API_BASE}/api/v1/chatbot/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return handleResponse<ChatbotResponse>(res);
+  },
+
+  async getChatHistory(caseId?: string): Promise<{ case_id: string | null; count: number; messages: any[] }> {
+    const params = new URLSearchParams();
+    if (caseId) params.append('case_id', caseId);
+    const res = await authFetch(`${API_BASE}/api/v1/chatbot/history?${params.toString()}`);
+    return handleResponse<{ case_id: string | null; count: number; messages: any[] }>(res);
+  },
+
+  async clearChatHistory(caseId?: string): Promise<{ status: string; case_id: string | null; cleared: number }> {
+    const params = new URLSearchParams();
+    if (caseId) params.append('case_id', caseId);
+    const res = await authFetch(`${API_BASE}/api/v1/chatbot/history?${params.toString()}`, {
+      method: 'DELETE'
+    });
+    return handleResponse<{ status: string; case_id: string | null; cleared: number }>(res);
+  },
+
+  // === REPORTING & EVIDENCE MANAGEMENT (FEATURE 10) ===
+  async getCourtDossierData(params?: {
+    caseId?: string;
+    investigatorName?: string;
+    investigatorId?: string;
+    agencyName?: string;
+    classification?: string;
+  }): Promise<CourtDossierData> {
+    const searchParams = new URLSearchParams();
+    if (params?.caseId) searchParams.append('case_id', params.caseId);
+    if (params?.investigatorName) searchParams.append('investigator_name', params.investigatorName);
+    if (params?.investigatorId) searchParams.append('investigator_id', params.investigatorId);
+    if (params?.agencyName) searchParams.append('agency_name', params.agencyName);
+    if (params?.classification) searchParams.append('classification', params.classification);
+    const res = await authFetch(`${API_BASE}/api/reports/court-dossier-data?${searchParams.toString()}`);
+    return handleResponse<CourtDossierData>(res);
+  },
+
+  async downloadCourtDossierPdf(params?: {
+    caseId?: string;
+    title?: string;
+    investigatorName?: string;
+    investigatorId?: string;
+    agencyName?: string;
+    classification?: string;
+  } | string, titleArg?: string): Promise<Blob> {
+    const searchParams = new URLSearchParams();
+    if (typeof params === 'string') {
+      searchParams.append('case_id', params);
+      if (titleArg) searchParams.append('title', titleArg);
+    } else if (params) {
+      if (params.caseId) searchParams.append('case_id', params.caseId);
+      if (params.title) searchParams.append('title', params.title);
+      if (params.investigatorName) searchParams.append('investigator_name', params.investigatorName);
+      if (params.investigatorId) searchParams.append('investigator_id', params.investigatorId);
+      if (params.agencyName) searchParams.append('agency_name', params.agencyName);
+      if (params.classification) searchParams.append('classification', params.classification);
+    }
+    const res = await authFetch(`${API_BASE}/api/reports/pdf?${searchParams.toString()}`);
+    if (!res.ok) throw new Error(`PDF Export Failed (${res.status}): ${res.statusText}`);
+    return res.blob();
+  },
+
+  async downloadSection65BCertificatePdf(params?: { caseId?: string; officerName?: string } | string, officerNameArg?: string): Promise<Blob> {
+    return this.downloadSection65bPdf(params, officerNameArg);
+  },
+
+  async downloadSection65bPdf(params?: { caseId?: string; officerName?: string } | string, officerNameArg?: string): Promise<Blob> {
+    const searchParams = new URLSearchParams();
+    if (typeof params === 'string') {
+      searchParams.append('case_id', params);
+      if (officerNameArg) searchParams.append('officer_name', officerNameArg);
+    } else if (params) {
+      if (params.caseId) searchParams.append('case_id', params.caseId);
+      if (params.officerName) searchParams.append('officer_name', params.officerName);
+    }
+    const res = await authFetch(`${API_BASE}/api/reports/section-65b?${searchParams.toString()}`);
+    if (!res.ok) throw new Error(`Section 65B Export Failed (${res.status}): ${res.statusText}`);
+    return res.blob();
+  },
+
+  async verifyCustody(caseId?: string): Promise<EvidenceCustodyResponse> {
+    const params = new URLSearchParams();
+    if (caseId) params.append('case_id', caseId);
+    const res = await authFetch(`${API_BASE}/api/reports/verify-custody?${params.toString()}`);
+    return handleResponse<EvidenceCustodyResponse>(res);
   }
 };
 
@@ -1912,3 +2129,461 @@ export interface CCTVIntelligenceResponse {
   }>;
 }
 
+// ==========================================
+// AUTOMATED CEP ALERTS TYPES (FEATURE 8)
+// ==========================================
+export interface CEPAlertMicroTimelineItem {
+  step: number;
+  type: string;
+  icon: string;
+  label: string;
+  timestamp: string;
+  details?: string;
+}
+
+export interface CEPAlert {
+  alert_id: string;
+  case_id: string;
+  pattern_name: string;
+  entity_id?: string;
+  entity_name?: string;
+  risk_level: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  risk_score: number;
+  status: 'PENDING' | 'INVESTIGATING' | 'ASSIGNED' | 'DISMISSED';
+  evidence_narrative: string;
+  micro_timeline: CEPAlertMicroTimelineItem[];
+  metadata_info?: Record<string, any>;
+  created_at?: string;
+  triaged_at?: string;
+  triaged_by?: string;
+}
+
+// ==========================================
+// ADVANCED OMNI-SEARCH TYPES (FEATURE 9)
+// ==========================================
+export interface OmniSearchCard {
+  entity_id: string;
+  primary_name: string;
+  type: string;
+  risk_score: number;
+  risk_level: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  known_aliases: string[];
+  verified_phones: string[];
+  bank_accounts: string[];
+  social_handles: string[];
+  match_confidence: number;
+  match_reason: string;
+  connected_nodes_count: number;
+  resolved_person?: {
+    name: string;
+    cluster_id?: string;
+    risk_score?: number;
+    role?: string;
+  };
+  associated_anomalies?: Array<{
+    finding_id: string;
+    title: string;
+    severity: string;
+    score: number;
+    domain: string;
+    detector?: string;
+    what_happened?: string;
+  }>;
+  associated_alerts?: Array<{
+    alert_id: string;
+    pattern_name: string;
+    risk_level: string;
+    risk_score: number;
+  }>;
+  timeline_snippet: Array<{
+    type: string;
+    icon: string;
+    label: string;
+    time: string;
+  }>;
+  graph_pivot_id?: string;
+}
+
+export interface OmniSearchResponse {
+  query: string;
+  detected_type: string;
+  classification: {
+    type: string;
+    normalized: string;
+    confidence: number;
+    label: string;
+  };
+  match_mode: string;
+  total_results: number;
+  cards: OmniSearchCard[];
+}
+
+export interface NLQueryResponse {
+  prompt: string;
+  cypher_query: string;
+  case_id: string;
+  total_records: number;
+  records: any[];
+  result_count?: number;
+  generated_cypher?: string;
+}
+
+export interface SearchHistoryItem {
+  id: number;
+  query: string;
+  detected_type?: string;
+  search_mode?: string;
+  results_count?: number;
+  created_at: string;
+}
+
+// ==========================================
+// EVIDENCE CUSTODY TYPES (FEATURE 10)
+// ==========================================
+export interface EvidenceCustodyResponse {
+  status: string;
+  case_id: string;
+  evidence_files_count: number;
+  evidence_manifest: Array<{
+    filename: string;
+    sha256: string;
+    file_size: number;
+    received_at?: string;
+    status: string;
+  }>;
+  audit_integrity: {
+    status: string;
+    total_audited: number;
+    verified_valid: number;
+    legacy_unhashed: number;
+    tampered_entries: number;
+    tamper_free: boolean;
+    verified_at?: string;
+  };
+  tamper_free: boolean;
+  legal_admissibility: string;
+  verified_at: string;
+}
+
+// ==========================================
+// AI FORENSIC CHATBOT TYPES
+// ==========================================
+export interface ChatbotResolvedEntity {
+  id: string;
+  name: string;
+  type: string;
+  risk_score: number;
+  cluster_id?: string;
+  pivot_id: string;
+  details?: string;
+}
+
+export interface ChatbotAnomaly {
+  finding_id: string;
+  title: string;
+  severity: string;
+  score: number;
+  domain: string;
+  what_happened?: string;
+}
+
+export interface ChatbotAlert {
+  pattern_name: string;
+  risk_level: string;
+  risk_score: number;
+  explanation?: string;
+}
+
+export interface ChatbotResponse {
+  reply: string;
+  tool_used?: string;
+  generated_cypher?: string;
+  sql_query?: string;
+  records_count: number;
+  records: any[];
+  resolved_entities: ChatbotResolvedEntity[];
+  anomalies: ChatbotAnomaly[];
+  alerts?: ChatbotAlert[];
+  suggested_followups: string[];
+  model_used: string;
+}
+
+// ==========================================
+// COURT-READY INVESTIGATION DOSSIER (7 SECTIONS)
+// ==========================================
+
+export interface CourtCaseMetadata {
+  case_file_id: string;
+  case_reference: string;
+  agency_name: string;
+  investigating_officer_id: string;
+  investigating_officer_name: string;
+  target_operation_name: string;
+  report_generation_timestamp_utc: string;
+  report_generation_timestamp_local: string;
+  security_classification: string;
+}
+
+export interface IngestedEvidenceItem {
+  source_file_name: string;
+  original_source_system: string;
+  records_ingested: string;
+  ingestion_timestamp: string;
+  primary_sha256_hash: string;
+  system_operator_id: string;
+}
+
+export interface Section1Custody {
+  case_metadata: CourtCaseMetadata;
+  evidence_cryptographic_inventory: IngestedEvidenceItem[];
+  legal_declaration_statute: string;
+  legal_declaration_text: string;
+}
+
+export interface RiskScoreComponent {
+  weight: number;
+  score: number;
+  contribution: number;
+}
+
+export interface MasterCompositeRiskScore {
+  total_composite_score: number;
+  risk_level: string;
+  formula: string;
+  rule_violation_component: RiskScoreComponent;
+  anomaly_component: RiskScoreComponent;
+  centrality_component: RiskScoreComponent;
+}
+
+export interface PipelineExecutionStep {
+  step_number: number;
+  pipeline_stage: string;
+  engine_specification: string;
+  execution_status: string;
+  integrity_result: string;
+}
+
+export interface Section2Synthesis {
+  executive_briefing_narrative: string;
+  master_composite_risk_score: MasterCompositeRiskScore;
+  pipeline_execution_audit: PipelineExecutionStep[];
+}
+
+export interface TargetCanonicalProfile {
+  canonical_id: string;
+  canonical_name: string;
+  resolved_aliases: string[];
+  primary_contact: string;
+  primary_contact_match: string;
+  associated_national_id: string;
+  national_id_match: string;
+  primary_device_imei: string;
+  device_imei_match: string;
+  mapped_bank_accounts: string[];
+  active_ip_subnets: string[];
+  entity_link_score: string;
+}
+
+export interface DiscrepancyMatrixItem {
+  attribute_field: string;
+  bank_statement_record: string;
+  cdr_record: string;
+  social_media_profile: string;
+  match_confidence_score: string;
+  evidentiary_weight: string;
+}
+
+export interface ResolvedEntityItem {
+  canonical_id: string;
+  primary_name: string;
+  known_aliases: string[];
+  known_phones: string[];
+  known_accounts: string[];
+  associated_emails: string[];
+  national_ids: string[];
+  social_handles: any[];
+  known_addresses: string[];
+  risk_score: number;
+  risk_level: string;
+  resolution_method: string;
+  last_updated?: string;
+}
+
+export interface Section3EntityDossier {
+  all_resolved_entities?: ResolvedEntityItem[];
+  target_canonical_profile: TargetCanonicalProfile;
+  attribute_discrepancy_matrix: DiscrepancyMatrixItem[];
+}
+
+export interface AnomalyRegistryItem {
+  anomaly_id: string;
+  title?: string;
+  threat_classification?: string;
+  detection_classification: string;
+  domain?: string;
+  colliding_modalities: string;
+  severity?: string;
+  unified_score?: number;
+  confidence_score: string;
+  severity_score?: string;
+  detection_engine?: string;
+  legal_significance: string;
+  status?: string;
+}
+
+export interface AnomalyProofBrief {
+  brief_code: string;
+  title: string;
+  severity: string;
+  domain?: string;
+  what_happened?: string;
+  why_unusual?: string;
+  why_relevant?: string;
+  narrative?: string;
+  narrative_proof?: string;
+  forensic_indicators?: Record<string, any>;
+}
+
+export interface Section4Anomalies {
+  flagged_anomaly_registry: AnomalyRegistryItem[];
+  deep_dive_proof_briefs: AnomalyProofBrief[];
+  high_priority_alerts?: HighPriorityAlert[];
+}
+
+export interface HighPriorityAlert {
+  alert_id: string;
+  pattern_name: string;
+  entity_id: string;
+  entity_name: string;
+  risk_level: string;
+  risk_score: number;
+  status: string;
+  evidence_narrative: string;
+  micro_timeline: Array<{
+    step?: number;
+    type?: string;
+    icon?: string;
+    label?: string;
+    timestamp?: string;
+    details?: string;
+  }>;
+  metadata_info?: Record<string, any>;
+  created_at?: string;
+}
+
+export interface AiForensicScience {
+  report_id?: number;
+  community_id?: number;
+  status?: string;
+  lead_investigator_assessment?: {
+    executive_assessment?: string;
+    syndicate_workflow?: string[];
+    priority_entities?: string[];
+    priority_actions?: string[];
+    contradictions?: string[];
+    evidence_gaps?: string[];
+    final_conclusion?: string;
+  };
+  specialist_agents?: {
+    financial_forensics?: {
+      analysis_status?: string;
+      investigation_summary?: string;
+      tactical_conclusion?: string;
+      insights?: string[];
+    };
+    geospatial_forensics?: {
+      analysis_status?: string;
+      investigation_summary?: string;
+      tactical_conclusion?: string;
+      insights?: string[];
+    };
+    temporal_forensics?: {
+      analysis_status?: string;
+      investigation_summary?: string;
+      tactical_conclusion?: string;
+      insights?: string[];
+    };
+  };
+}
+
+export interface GdsStructuralMetric {
+  node_identifier: string;
+  entity_node_id?: string;
+  entity_name?: string;
+  betweenness_centrality: string;
+  pagerank_score: string;
+  leiden_community: string;
+  leiden_community_cluster?: string;
+  inferred_criminal_role: string;
+  inferred_network_role?: string;
+}
+
+export interface CovertBridgeFinding {
+  target_node: string;
+  finding_summary: string;
+  legal_implication: string;
+}
+
+export interface Section5GdsTopology {
+  graph_structural_metrics: GdsStructuralMetric[];
+  covert_bridge_finding: CovertBridgeFinding;
+  gds_key_findings?: {
+    covert_bridge_identification?: string;
+    leiden_community_detection?: string;
+  };
+}
+
+export interface MasterEvidenceLogEntry {
+  timestamp_utc: string;
+  domain: string;
+  data_source_domain?: string;
+  raw_event_summary: string;
+  normalized_entity_id: string;
+  anomaly_risk_flag: string;
+  evidence_source: string;
+}
+
+export interface Section6ChronologicalLog {
+  total_events_collated: number;
+  evidence_timeline_master: MasterEvidenceLogEntry[];
+}
+
+export interface ImmutableAuditRecord {
+  activity_id: string;
+  investigator_id: string;
+  action_type: string;
+  parameters: string;
+  sha256_signature: string;
+}
+
+export interface FinalVerificationSeal {
+  generated_pdf_sha256_placeholder: string;
+  digital_verification_signature: string;
+  attestation_statement: string;
+  certifying_officer: string;
+  certifying_officer_id: string;
+  certifying_badge?: string;
+  attestation_date: string;
+  verified_at?: string;
+  legal_warning: string;
+}
+
+export interface Section7AuditAnnexure {
+  immutable_user_activity_audit_log: ImmutableAuditRecord[];
+  final_verification_seal: FinalVerificationSeal;
+}
+
+export interface CourtDossierData {
+  case_id: string;
+  case_reference: string;
+  case_title: string;
+  high_priority_alerts?: HighPriorityAlert[];
+  ai_forensic_science?: AiForensicScience;
+  section_1_custody: Section1Custody;
+  section_2_synthesis: Section2Synthesis;
+  section_3_entity_dossier: Section3EntityDossier;
+  section_4_anomalies: Section4Anomalies;
+  section_5_gds_topology: Section5GdsTopology;
+  section_6_chronological_log: Section6ChronologicalLog;
+  section_7_audit_annexure: Section7AuditAnnexure;
+}

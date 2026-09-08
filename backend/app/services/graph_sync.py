@@ -58,9 +58,8 @@ def sync_mongo_to_neo4j(case_id: Optional[str] = None):
         if profile_dicts:
             run_batched("""
                 UNWIND $batch AS p
-                MERGE (person:Person {golden_id: p.z_cluster_id})
+                MERGE (person:Person {case_id: p.case_id, golden_id: p.z_cluster_id})
                 SET person.name        = p.primary_name,
-                    person.case_id     = p.case_id,
                     person.risk_score  = p.risk_score,
                     person.aliases     = p.aliases,
                     person.phones      = p.phones,
@@ -92,8 +91,12 @@ def sync_mongo_to_neo4j(case_id: Optional[str] = None):
                 run_batched("""
                     UNWIND $batch AS row
                     MERGE (ph:Phone {number: row.phone})
-                    SET ph.case_id = row.case_id
-                    MERGE (p:Person {golden_id: row.cluster_id})
+                    SET ph.case_id = row.case_id,
+                        ph.case_ids = CASE 
+                            WHEN ph.case_ids IS NULL THEN [row.case_id]
+                            WHEN row.case_id IN ph.case_ids THEN ph.case_ids
+                            ELSE ph.case_ids + [row.case_id] END
+                    MERGE (p:Person {case_id: row.case_id, golden_id: row.cluster_id})
                     MERGE (p)-[r:OWNS_PHONE]->(ph)
                     SET r.case_id = row.case_id
                 """, owns_phone_batch)
@@ -102,8 +105,13 @@ def sync_mongo_to_neo4j(case_id: Optional[str] = None):
                 run_batched("""
                     UNWIND $batch AS row
                     MERGE (ba:BankAccount {account_number: row.acc})
-                    SET ba.holder = row.name, ba.case_id = row.case_id
-                    MERGE (p:Person {golden_id: row.cluster_id})
+                    SET ba.holder = row.name, 
+                        ba.case_id = row.case_id,
+                        ba.case_ids = CASE 
+                            WHEN ba.case_ids IS NULL THEN [row.case_id]
+                            WHEN row.case_id IN ba.case_ids THEN ba.case_ids
+                            ELSE ba.case_ids + [row.case_id] END
+                    MERGE (p:Person {case_id: row.case_id, golden_id: row.cluster_id})
                     MERGE (p)-[r:OWNS_ACCOUNT]->(ba)
                     SET r.case_id = row.case_id
                 """, owns_acc_batch)
@@ -112,8 +120,13 @@ def sync_mongo_to_neo4j(case_id: Optional[str] = None):
                 run_batched("""
                     UNWIND $batch AS row
                     MERGE (s:SocialAccount {handle: row.handle})
-                    SET s.platform = row.platform, s.case_id = row.case_id
-                    MERGE (p:Person {golden_id: row.cluster_id})
+                    SET s.platform = row.platform, 
+                        s.case_id = row.case_id,
+                        s.case_ids = CASE 
+                            WHEN s.case_ids IS NULL THEN [row.case_id]
+                            WHEN row.case_id IN s.case_ids THEN s.case_ids
+                            ELSE s.case_ids + [row.case_id] END
+                    MERGE (p:Person {case_id: row.case_id, golden_id: row.cluster_id})
                     MERGE (p)-[r:USES_HANDLE]->(s)
                     SET r.case_id = row.case_id
                 """, uses_handle_batch)
@@ -303,9 +316,11 @@ def sync_mongo_to_neo4j(case_id: Optional[str] = None):
             run_batched("""
                 UNWIND $batch AS row
                 MERGE (ph:Phone {number: row.phone})
-                SET ph.case_id = row.case_id
+                SET ph.case_id = row.case_id,
+                    ph.case_ids = CASE WHEN ph.case_ids IS NULL THEN [row.case_id] WHEN row.case_id IN ph.case_ids THEN ph.case_ids ELSE ph.case_ids + [row.case_id] END
                 MERGE (i:IMEI {imei_number: row.imei})
-                SET i.case_id = row.case_id
+                SET i.case_id = row.case_id,
+                    i.case_ids = CASE WHEN i.case_ids IS NULL THEN [row.case_id] WHEN row.case_id IN i.case_ids THEN i.case_ids ELSE i.case_ids + [row.case_id] END
                 MERGE (ph)-[r:USED_DEVICE]->(i)
                 SET r.last_seen = row.last_seen, r.case_id = row.case_id
             """, list(used_device_map.values()))
@@ -314,9 +329,11 @@ def sync_mongo_to_neo4j(case_id: Optional[str] = None):
             run_batched("""
                 UNWIND $batch AS row
                 MERGE (t:CellTower {tower_id: row.tower})
-                SET t.lat = row.lat, t.lng = row.lng, t.address = row.address, t.case_id = row.case_id
+                SET t.lat = row.lat, t.lng = row.lng, t.address = row.address, t.case_id = row.case_id,
+                    t.case_ids = CASE WHEN t.case_ids IS NULL THEN [row.case_id] WHEN row.case_id IN t.case_ids THEN t.case_ids ELSE t.case_ids + [row.case_id] END
                 MERGE (ph:Phone {number: row.phone})
-                SET ph.case_id = row.case_id
+                SET ph.case_id = row.case_id,
+                    ph.case_ids = CASE WHEN ph.case_ids IS NULL THEN [row.case_id] WHEN row.case_id IN ph.case_ids THEN ph.case_ids ELSE ph.case_ids + [row.case_id] END
                 MERGE (ph)-[r:PINGED_TOWER]->(t)
                 SET r.last_seen = row.last_seen, r.duration = row.duration, r.pings_count = row.pings_count, r.case_id = row.case_id
             """, list(pinged_tower_map.values()))
@@ -325,9 +342,11 @@ def sync_mongo_to_neo4j(case_id: Optional[str] = None):
             run_batched("""
                 UNWIND $batch AS row
                 MERGE (i:IPAddress {address: row.ip})
-                SET i.case_id = row.case_id
+                SET i.case_id = row.case_id,
+                    i.case_ids = CASE WHEN i.case_ids IS NULL THEN [row.case_id] WHEN row.case_id IN i.case_ids THEN i.case_ids ELSE i.case_ids + [row.case_id] END
                 MERGE (ph:Phone {number: row.phone})
-                SET ph.case_id = row.case_id
+                SET ph.case_id = row.case_id,
+                    ph.case_ids = CASE WHEN ph.case_ids IS NULL THEN [row.case_id] WHEN row.case_id IN ph.case_ids THEN ph.case_ids ELSE ph.case_ids + [row.case_id] END
                 MERGE (ph)-[r:ASSIGNED_IP]->(i)
                 SET r.last_seen = row.last_seen, r.case_id = row.case_id
             """, list(assigned_ip_map.values()))
@@ -336,9 +355,11 @@ def sync_mongo_to_neo4j(case_id: Optional[str] = None):
             run_batched("""
                 UNWIND $batch AS row
                 MERGE (i:IPAddress {address: row.ip})
-                SET i.case_id = row.case_id
+                SET i.case_id = row.case_id,
+                    i.case_ids = CASE WHEN i.case_ids IS NULL THEN [row.case_id] WHEN row.case_id IN i.case_ids THEN i.case_ids ELSE i.case_ids + [row.case_id] END
                 MERGE (s:SocialAccount {handle: row.handle})
-                SET s.platform = row.platform, s.case_id = row.case_id
+                SET s.platform = row.platform, s.case_id = row.case_id,
+                    s.case_ids = CASE WHEN s.case_ids IS NULL THEN [row.case_id] WHEN row.case_id IN s.case_ids THEN s.case_ids ELSE s.case_ids + [row.case_id] END
                 MERGE (s)-[r:LOGGED_IN_FROM]->(i)
                 SET r.last_seen = row.last_seen, r.case_id = row.case_id
             """, list(social_ip_map.values()))
@@ -347,9 +368,9 @@ def sync_mongo_to_neo4j(case_id: Optional[str] = None):
             run_batched("""
                 UNWIND $batch AS row
                 MERGE (i:IPAddress {address: row.ip})
-                SET i.case_id = row.case_id
-                MERGE (p:Person {golden_id: row.cluster_id})
-                SET p.case_id = row.case_id
+                SET i.case_id = row.case_id,
+                    i.case_ids = CASE WHEN i.case_ids IS NULL THEN [row.case_id] WHEN row.case_id IN i.case_ids THEN i.case_ids ELSE i.case_ids + [row.case_id] END
+                MERGE (p:Person {case_id: row.case_id, golden_id: row.cluster_id})
                 MERGE (p)-[r:LOGGED_IN_FROM]->(i)
                 SET r.last_seen = row.last_seen, r.case_id = row.case_id
             """, list(person_ip_map.values()))
@@ -358,9 +379,11 @@ def sync_mongo_to_neo4j(case_id: Optional[str] = None):
             run_batched("""
                 UNWIND $batch AS row
                 MERGE (ba:BankAccount {account_number: row.acc})
-                SET ba.case_id = row.case_id
+                SET ba.case_id = row.case_id,
+                    ba.case_ids = CASE WHEN ba.case_ids IS NULL THEN [row.case_id] WHEN row.case_id IN ba.case_ids THEN ba.case_ids ELSE ba.case_ids + [row.case_id] END
                 MERGE (cp:BankAccount {account_number: row.cp})
-                SET cp.case_id = row.case_id
+                SET cp.case_id = row.case_id,
+                    cp.case_ids = CASE WHEN cp.case_ids IS NULL THEN [row.case_id] WHEN row.case_id IN cp.case_ids THEN cp.case_ids ELSE cp.case_ids + [row.case_id] END
                 MERGE (ba)-[r:TRANSACTED_WITH]->(cp)
                 SET r.amount = row.total_amount,
                     r.total_amount = row.total_amount,
@@ -375,9 +398,11 @@ def sync_mongo_to_neo4j(case_id: Optional[str] = None):
             run_batched("""
                 UNWIND $batch AS row
                 MERGE (ba:BankAccount {account_number: row.acc})
-                SET ba.case_id = row.case_id
+                SET ba.case_id = row.case_id,
+                    ba.case_ids = CASE WHEN ba.case_ids IS NULL THEN [row.case_id] WHEN row.case_id IN ba.case_ids THEN ba.case_ids ELSE ba.case_ids + [row.case_id] END
                 MERGE (atm:ATM {atm_id: row.atm_id})
-                SET atm.location = row.loc, atm.case_id = row.case_id
+                SET atm.location = row.loc, atm.case_id = row.case_id,
+                    atm.case_ids = CASE WHEN atm.case_ids IS NULL THEN [row.case_id] WHEN row.case_id IN atm.case_ids THEN atm.case_ids ELSE atm.case_ids + [row.case_id] END
                 MERGE (ba)-[r:WITHDREW_CASH_AT]->(atm)
                 SET r.amount = row.total_amount,
                     r.total_amount = row.total_amount,
@@ -390,9 +415,11 @@ def sync_mongo_to_neo4j(case_id: Optional[str] = None):
             run_batched("""
                 UNWIND $batch AS row
                 MERGE (caller:Phone {number: row.caller})
-                SET caller.case_id = row.case_id
+                SET caller.case_id = row.case_id,
+                    caller.case_ids = CASE WHEN caller.case_ids IS NULL THEN [row.case_id] WHEN row.case_id IN caller.case_ids THEN caller.case_ids ELSE caller.case_ids + [row.case_id] END
                 MERGE (callee:Phone {number: row.callee})
-                SET callee.case_id = row.case_id
+                SET callee.case_id = row.case_id,
+                    callee.case_ids = CASE WHEN callee.case_ids IS NULL THEN [row.case_id] WHEN row.case_id IN callee.case_ids THEN callee.case_ids ELSE callee.case_ids + [row.case_id] END
                 MERGE (caller)-[r:CALLED]->(callee)
                 SET r.duration = row.total_duration,
                     r.total_duration = row.total_duration,

@@ -44,7 +44,7 @@ class TimelineInvestigationService:
         """
         Builds or returns cached timeline artifacts (normalized events, correlations, bursts, inconsistencies).
         """
-        if case_id in self._cache:
+        if case_id in self._cache and self._cache[case_id].get("events"):
             return self._cache[case_id]
 
         logger.info(f"[TimelineService] Building full timeline dataset for Case: {case_id}")
@@ -130,7 +130,8 @@ class TimelineInvestigationService:
             "storylines": storylines,
             "timestamp": normalized_events[-1].timestamp_ms if normalized_events else 0
         }
-        self._cache[case_id] = payload
+        if normalized_events:
+            self._cache[case_id] = payload
         return payload
 
     def invalidate_cache(self, case_id: Optional[str] = None):

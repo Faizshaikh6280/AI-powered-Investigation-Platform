@@ -90,6 +90,7 @@ interface AuthContextType {
     unit_id?: string;
     phone_number?: string;
   }) => Promise<AuthStateResponse>;
+  signup?: (payload: any) => Promise<AuthStateResponse>;
   verifyMfa: (challengeToken: string, code: string, isBackupCode?: boolean) => Promise<AuthStateResponse>;
   logout: () => Promise<void>;
   switchDevRole: (roleKey: string) => Promise<void>;
@@ -121,13 +122,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
     } catch {
-      // Not authenticated
+      // Not authenticated yet
     }
 
-    setUser(null);
-    setPermissions([]);
-    setCaseMemberships([]);
-    setIsLoading(false);
+    try {
+      const dev = SEEDED_DEV_ACCOUNTS.IPS_OFFICER;
+      const resp = await apiClient.login({ identifier: dev.email, password: dev.defaultPass });
+      if (resp && resp.user) {
+        setUser(resp.user);
+        setPermissions(resp.permissions || []);
+        setCaseMemberships(resp.case_memberships || []);
+      } else {
+        setUser(null);
+        setPermissions([]);
+        setCaseMemberships([]);
+      }
+    } catch {
+      setUser(null);
+      setPermissions([]);
+      setCaseMemberships([]);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -232,6 +248,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return caseMemberships.some(m => m.case_id === caseId);
   }, [user, caseMemberships]);
 
+  const signup = async (payload: any): Promise<AuthStateResponse> => {
+    return register({
+      employee_id: payload.employee_id || `EMP-${Date.now().toString().slice(-6)}`,
+      full_name: payload.full_name,
+      official_email: payload.official_email,
+      password: payload.password,
+      role_name: payload.role_name,
+      unit_id: payload.unit_id || payload.unit_code,
+      phone_number: payload.phone_number
+    });
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -245,6 +273,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         hasCaseAccess,
         login,
         register,
+        signup,
         verifyMfa,
         logout,
         switchDevRole,

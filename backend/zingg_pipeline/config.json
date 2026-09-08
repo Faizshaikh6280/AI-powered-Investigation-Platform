@@ -5,7 +5,10 @@
     { "fieldName": "phone", "matchType": "EXACT", "dataType": "string" },
     { "fieldName": "national_id", "matchType": "EXACT", "dataType": "string" },
     { "fieldName": "email", "matchType": "EXACT", "dataType": "string" },
-    { "fieldName": "address", "matchType": "FUZZY", "dataType": "string" }
+    { "fieldName": "address", "matchType": "FUZZY", "dataType": "string" },
+    { "fieldName": "account_number", "matchType": "EXACT", "dataType": "string" },
+    { "fieldName": "social_handle", "matchType": "FUZZY", "dataType": "string" },
+    { "fieldName": "device_id", "matchType": "EXACT", "dataType": "string" }
   ],
   "data": [
     {

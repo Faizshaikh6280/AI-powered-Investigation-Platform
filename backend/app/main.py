@@ -20,6 +20,10 @@ from app.api.case_members import router as case_members_router
 from app.api.reports import router as reports_router
 from app.api.nfc import router as nfc_router
 from app.api.nfc_evidence import router as nfc_evidence_router
+from app.api.alerts import router as alerts_router
+from app.api.search import router as search_router
+from app.api.chatbot import router as chatbot_router
+
 
 from app.core.middleware import SecurityHeadersMiddleware, CorrelationIdMiddleware
 from app.core.database import init_postgres, get_db_context
@@ -72,6 +76,10 @@ app.include_router(geo_timeline_router, prefix="/api/geo", tags=["Geo Timeline"]
 app.include_router(anomaly_router, prefix="/api/anomalies", tags=["Anomalies"])
 app.include_router(timeline_router, prefix="/api/timeline", tags=["Timeline & Digital Footprint"])
 app.include_router(investigation_router)
+app.include_router(alerts_router)
+app.include_router(search_router)
+app.include_router(chatbot_router)
+
 
 @app.post("/api/system/reset")
 async def reset_all(
@@ -104,7 +112,7 @@ async def get_golden_profiles(
             events = canonical_reader.read_all_events(case_id=target_case_id)
             if events:
                 from app.services.zingg_er import run_entity_resolution
-                await run_entity_resolution(case_id=target_case_id)
+                run_entity_resolution(case_id=target_case_id)
                 profiles = db.query(GoldenProfileModel).filter(GoldenProfileModel.case_id == target_case_id).all()
 
         return [{

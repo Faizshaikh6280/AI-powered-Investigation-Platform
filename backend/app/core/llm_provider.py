@@ -8,20 +8,22 @@ def resolve_ollama_base_url() -> str:
         return base_url.replace("localhost", "host.docker.internal").replace("127.0.0.1", "host.docker.internal")
     return base_url
 
-def get_llm(num_predict: int = 2000, num_ctx: int = 8192):
+def get_llm(num_predict: int = 1500, num_ctx: int = 3584):
     """Return a LangChain ChatModel based on the LLM_PROVIDER setting with configurable token parameters."""
     provider = (os.getenv("LLM_PROVIDER") or settings.LLM_PROVIDER or "ollama").lower()
 
     if provider in ("local", "ollama"):
         from langchain_ollama import ChatOllama
         base_url = resolve_ollama_base_url()
+        # Respect user configured model (e.g. llama3:8b or qwen2.5:7b-instruct)
         model_name = os.getenv("LLM_MODEL") or settings.LLM_MODEL or "qwen2.5:7b-instruct"
         return ChatOllama(
             base_url=base_url,
             model=model_name,
             temperature=0.0,
-            num_ctx=num_ctx,
-            num_predict=num_predict
+            num_ctx=min(num_ctx, 4096),
+            num_predict=num_predict,
+            keep_alive="24h"
         )
     else:
         # Google Gemini fallback

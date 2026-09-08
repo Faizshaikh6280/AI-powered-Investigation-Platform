@@ -10,14 +10,15 @@ class InvestigationState(TypedDict):
     spatial_analysis: str
     final_intelligence_dossier: str
 
-# Use the Gemini Flash model lazily
+# Use unified LLM provider (Ollama / Local LLM)
+from app.core.llm_provider import get_llm as get_core_llm
+
 _llm = None
 def get_llm():
     global _llm
     if _llm is None:
         try:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            _llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
+            _llm = get_core_llm(num_predict=1200, num_ctx=4096)
         except Exception:
             _llm = None
     return _llm

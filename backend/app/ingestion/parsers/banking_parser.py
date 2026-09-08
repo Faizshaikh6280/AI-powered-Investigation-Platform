@@ -6,6 +6,7 @@ from typing import List, Dict, Any
 from app.schemas.canonical_event import (
     CanonicalEvent, CanonicalEntities, CanonicalTelemetry, CanonicalFinancial, EventProvenance
 )
+from app.ingestion.synonyms import extract_canonical_fields, clean_name
 from app.ingestion.parsers.base import BaseParser
 
 class BankingParser(BaseParser):
@@ -83,15 +84,16 @@ class BankingParser(BaseParser):
             rows = list(reader)
 
         for idx, row in enumerate(rows, start=1):
-            phone = self.clean_phone(row.get("linked_phone") or row.get("phone"))
+            canon = extract_canonical_fields(row)
+            phone = self.clean_phone(canon["phone"] or row.get("linked_phone") or row.get("phone"))
             timestamp = self.clean_date(
                 row.get("transaction_time") or row.get("timestamp") or row.get("txn_date") or row.get("date")
             )
             amount = self.parse_float(row.get("amount_inr") or row.get("amount") or row.get("transaction_amount"))
-            acc_num = str(row.get("account_number") or row.get("account") or row.get("from_account") or "").strip()
+            acc_num = str(canon["account"] or row.get("account_number") or row.get("account") or row.get("from_account") or "").strip()
             
-            sender = str(row.get("sender") or row.get("from_name") or "").strip()
-            receiver = str(row.get("receiver") or row.get("to_name") or "").strip()
+            sender = str(row.get("sender") or row.get("from_name") or row.get("remitter_name") or "").strip()
+            receiver = str(row.get("receiver") or row.get("to_name") or row.get("beneficiary_name") or "").strip()
             raw_txn_type = str(row.get("transaction_type") or row.get("txn_type") or "TRANSFER").upper()
             raw_channel = str(row.get("channel") or "").upper()
             
@@ -100,26 +102,27 @@ class BankingParser(BaseParser):
             if "ATM" in raw_txn_type or "CASH" in raw_txn_type or raw_channel == "ATM":
                 norm_txn_type = "DEBIT"
                 channel = "ATM"
-                primary_name = sender or receiver or row.get("account_holder_name") or row.get("name")
+                primary_name = clean_name(sender or receiver or row.get("account_holder_name") or canon["name"])
                 counterparty = counterparty or "ATM"
             elif raw_txn_type in ("CREDIT", "DEPOSIT", "INFLOW"):
                 norm_txn_type = "CREDIT"
                 channel = raw_channel or "TRANSFER"
-                primary_name = receiver or row.get("account_holder_name") or row.get("name") or sender
+                primary_name = clean_name(receiver or row.get("account_holder_name") or canon["name"] or sender)
                 counterparty = counterparty or sender
             else:
                 norm_txn_type = "DEBIT"
                 channel = raw_channel or "TRANSFER"
-                primary_name = sender or row.get("account_holder_name") or row.get("name") or receiver
+                primary_name = clean_name(sender or row.get("account_holder_name") or canon["name"] or receiver)
                 counterparty = counterparty or receiver
 
-            device_imei = str(row.get("device_imei") or row.get("imei") or "").strip() or None
-            location_str = str(row.get("location") or row.get("address") or "").strip() or None
+            device_imei = str(canon["device_id"] or row.get("device_imei") or row.get("imei") or "").strip() or None
+            location_str = str(canon["address"] or row.get("location") or row.get("address") or "").strip() or None
             atm_id = str(row.get("atm_id") or "").strip() or None
 
             entities = CanonicalEntities(
                 name=primary_name if primary_name else None,
                 phone=phone,
+                national_id=canon["national_id"],
                 counterparty_name=counterparty if counterparty else None
             )
 

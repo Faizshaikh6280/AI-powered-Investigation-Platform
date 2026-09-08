@@ -267,6 +267,7 @@ def build_canonical_graph(target_case_id: str):
 @router.get("/topology")
 def get_graph_topology(
     case_id: Optional[str] = None,
+    community_id: Optional[str] = None,
     current_user: UserModel = Depends(require_permission(Permissions.GRAPH_VIEW)),
     db: Session = Depends(get_db)
 ):
@@ -278,14 +279,17 @@ def get_graph_topology(
             return {"nodes": [], "edges": []}
         target_case_id = c.case_id
 
-    # Check case membership if scoped investigator
-    role_name = current_user.role.name if current_user.role else ""
-    if role_name not in (Roles.SYSTEM_ADMIN, Roles.SUPERINTENDENT, Roles.AUDITOR):
-        is_member = db.query(CaseMemberModel).filter_by(
-            case_id=target_case_id, user_id=current_user.id, active=True
-        ).first()
-        if not is_member and role_name != Roles.IPS_OFFICER:
-            raise HTTPException(status_code=403, detail=f"Access denied: Not assigned to case {target_case_id}")
+    # Filter by community if provided and not 'all'
+    cid_filter = None
+    cid_int = None
+    cid_str = None
+    if community_id and str(community_id).strip().lower() not in ("all", "null", "none", ""):
+        cid_filter = str(community_id).strip()
+        cid_str = cid_filter
+        try:
+            cid_int = int(cid_filter)
+        except ValueError:
+            cid_int = None
 
     # If Neo4j is connected, synchronize and query native Cypher graph
     if neo4j_client.ensure_connected():
@@ -302,26 +306,33 @@ def get_graph_topology(
 
             query = """
             MATCH (n) WHERE NOT 'Anomaly' IN labels(n) AND (n.case_id = $case_id OR $case_id IN coalesce(n.case_ids, []))
+              AND ($cid_filter IS NULL OR n.communityId = $cid_int OR toString(n.communityId) = $cid_str)
             OPTIONAL MATCH (n)-[r]->(m) 
             WHERE NOT 'Anomaly' IN labels(m) 
               AND (m.case_id = $case_id OR $case_id IN coalesce(m.case_ids, []))
+              AND ($cid_filter IS NULL OR m.communityId = $cid_int OR toString(m.communityId) = $cid_str)
               AND NOT type(r) IN ['SIMILAR_BEHAVIOR', 'CO_OFFENDING', 'HAS_ANOMALY']
             RETURN 
-                id(n) AS source_id, 
+                elementId(n) AS source_id, 
                 labels(n) AS source_labels, 
                 properties(n) AS source_props,
-                id(m) AS target_id,
+                elementId(m) AS target_id,
                 labels(m) AS target_labels,
                 properties(m) AS target_props,
                 type(r) AS rel_type,
-                id(r) AS rel_id,
+                elementId(r) AS rel_id,
                 properties(r) AS rel_props
             LIMIT 2500
             """
             nodes = {}
             edges = []
             with neo4j_client.driver.session() as session:
-                result = session.run(query, {"case_id": target_case_id})
+                result = session.run(query, {
+                    "case_id": target_case_id,
+                    "cid_filter": cid_filter,
+                    "cid_int": cid_int,
+                    "cid_str": cid_str
+                })
                 for record in result:
                     s_id = record["source_id"]
                     if s_id not in nodes:

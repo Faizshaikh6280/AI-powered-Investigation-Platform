@@ -32,6 +32,10 @@ import CreateCaseModal from '../components/CreateCaseModal';
 import LoginModal from '../components/auth/LoginModal';
 import UserProfileModal from '../components/auth/UserProfileModal';
 import UserManagementView from '../components/admin/UserManagementView';
+import { AIForensicChatbot } from '../components/AIForensicChatbot';
+import { OmniSearchModal } from '../components/OmniSearchModal';
+import EditCaseModal from '../components/EditCaseModal';
+
 
 interface NavItem {
   id: string;
@@ -80,6 +84,15 @@ function InvestigationWorkspace() {
   const [focusAnomalyEntityId, setFocusAnomalyEntityId] = useState<string | null>(null);
   const [focusCommunityId, setFocusCommunityId] = useState<number | string | null>(null);
   const [focusEntityIds, setFocusEntityIds] = useState<string[] | null>(null);
+  const [isChatbotOpen, setIsChatbotOpen] = useState(false);
+  const [isEditCaseOpen, setIsEditCaseOpen] = useState(false);
+  const [editingCase, setEditingCase] = useState<any>(null);
+
+  const handlePivotToGraph = (entityId: string) => {
+    setFocusAnomalyEntityId(entityId);
+    setActiveTab('relationship-graph');
+  };
+
 
   // Case Selector Dropdown State
   const [isCaseDropdownOpen, setIsCaseDropdownOpen] = useState(false);
@@ -527,6 +540,13 @@ function InvestigationWorkspace() {
           {activeTab === 'relationship-graph' && (
             <GraphTopologyViewer 
               focusEntityId={focusAnomalyEntityId} 
+              focusEntityIds={focusEntityIds}
+              focusCommunityId={focusCommunityId}
+              onClearFocus={() => {
+                setFocusAnomalyEntityId(null);
+                setFocusEntityIds(null);
+                setFocusCommunityId(null);
+              }}
             />
           )}
 
@@ -558,6 +578,7 @@ function InvestigationWorkspace() {
           {activeTab === 'anomalies' && (
             <AnomaliesTab 
               onAnomalySelect={(anomaly) => setSelectedAnomaly(anomaly)} 
+              onPivotToGraph={handlePivotToGraph}
             />
           )}
 
@@ -576,6 +597,12 @@ function InvestigationWorkspace() {
           {activeTab === 'agentic' && (
             <InvestigationDashboard 
               activeCaseId={activeCase?.case_id || ""} 
+              onNavigateToGraph={(entityIds, communityId) => {
+                setFocusEntityIds(entityIds || null);
+                setFocusCommunityId(communityId !== undefined ? communityId : null);
+                setFocusAnomalyEntityId(null);
+                setActiveTab('relationship-graph');
+              }}
             />
           )}
         </main>
@@ -610,45 +637,31 @@ function InvestigationWorkspace() {
       <LoginModal />
       <UserProfileModal />
 
-      {/* Command Palette Modal */}
-      {cmdOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center pt-16 sm:pt-28 px-3 sm:px-4 bg-black/40 backdrop-blur-sm" onClick={() => setCmdOpen(false)}>
-          <div className="w-full max-w-2xl bg-card border border-border rounded-xl shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center px-4 py-3 border-b border-border">
-              <Search className="w-5 h-5 text-muted-foreground mr-3" />
-              <input 
-                autoFocus
-                type="text" 
-                placeholder="Search TRACE entities, cases, phones, accounts..." 
-                className="flex-1 bg-transparent border-none outline-none text-foreground placeholder:text-muted-foreground text-sm"
-              />
-              <kbd className="font-mono text-xs text-muted-foreground bg-secondary px-1.5 py-0.5 rounded border border-border">ESC</kbd>
-            </div>
-            <div className="p-2 max-h-[60vh] overflow-y-auto space-y-1">
-              <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Quick Actions</div>
-              {[
-                { label: 'Create New Case Dossier', action: () => { setCmdOpen(false); setIsCreateModalOpen(true); }, perm: 'case.create' },
-                { label: 'Open Multi-Engine Anomaly Radar', action: () => { setCmdOpen(false); setActiveTab('anomalies'); }, perm: 'anomaly.view' },
-                { label: 'View Relationship Graph Topology', action: () => { setCmdOpen(false); setActiveTab('relationship-graph'); }, perm: 'graph.view' },
-                { label: 'View Zingg Entity Resolution', action: () => { setCmdOpen(false); setActiveTab('entity-explorer'); }, perm: 'entity.view' },
-                { label: 'Ingest Evidence Files', action: () => { setCmdOpen(false); setActiveTab('data-sources'); }, perm: 'evidence.upload' },
-                { label: 'Run Processing Pipeline', action: () => { setCmdOpen(false); setActiveTab('pipeline'); }, perm: 'evidence.view' },
-                { label: 'Personnel Directory & IAM', action: () => { setCmdOpen(false); setActiveTab('personnel'); }, perm: 'user.view' },
-                { label: 'Inspect Audit Trail Logs', action: () => { setCmdOpen(false); setActiveTab('audit'); }, perm: 'audit.view' },
-                { label: 'Officer Profile & Active Sessions', action: () => { setCmdOpen(false); setIsProfileModalOpen(true); } },
-              ].filter(item => !item.perm || can(item.perm)).map((cmd, i) => (
-                <button 
-                  key={i} 
-                  onClick={cmd.action}
-                  className="w-full text-left px-3 py-2 rounded-md text-sm text-foreground hover:bg-secondary hover:text-primary transition-colors flex items-center gap-2"
-                >
-                  <Command className="w-4 h-4 text-muted-foreground" /> {cmd.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Case Management Modals */}
+      <EditCaseModal
+        isOpen={isEditCaseOpen}
+        onClose={() => {
+          setIsEditCaseOpen(false);
+          setEditingCase(null);
+        }}
+        targetCase={editingCase}
+      />
+
+      {/* TRACE Intelligent Omni-Bar & Search Modal */}
+      <OmniSearchModal 
+        isOpen={cmdOpen}
+        onClose={() => setCmdOpen(false)}
+        caseId={activeCase?.case_id}
+        onPivotToGraph={handlePivotToGraph}
+      />
+
+      {/* AI Forensic Chatbot (Voice + Text + Qwen 2.5 on Local GPU) */}
+      <AIForensicChatbot
+        activeCaseId={activeCase?.case_id}
+        onPivotToGraph={handlePivotToGraph}
+        isOpen={isChatbotOpen}
+        onOpenChange={setIsChatbotOpen}
+      />
     </div>
   );
 }

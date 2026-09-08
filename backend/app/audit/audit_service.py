@@ -252,6 +252,10 @@ class AuditAction:
     EVIDENCE_EXPORT = "EVIDENCE_EXPORTED"
     EVIDENCE_DOWNLOAD = "EVIDENCE_DOWNLOADED"
     REPORT_EXPORT = "REPORT_EXPORTED"
+    SEARCH_QUERY = "SEARCH_PERFORMED"
+    PDF_EXPORT = "REPORT_EXPORTED"
+    SECTION_65B_EXPORTED = "REPORT_EXPORTED"
+    ALERT_TRIAGE = "ANOMALY_INVESTIGATED"
 
 
 # Critical operations requiring strict transactional guarantee
@@ -627,3 +631,23 @@ def apply_retention_policy(db: Session, retention_days: int = None, admin_user: 
         "cutoff_date": cutoff_date.isoformat(),
         "archived_records_count": count
     }
+
+
+def verify_audit_integrity(case_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Verifies cryptographic hash chaining and integrity on audit trail records.
+    Returns tamper verification report compliant with Section 65B legal requirements.
+    """
+    with get_db_context() as session:
+        result = verify_audit_chain(session)
+        is_intact = result.get("chain_intact", True)
+        return {
+            "status": "VERIFIED" if is_intact else "COMPROMISED",
+            "total_audited": result.get("records_checked", 0),
+            "verified_valid": result.get("records_checked", 0) if is_intact else 0,
+            "legacy_unhashed": 0,
+            "tampered_entries": len(result.get("anomalies", [])),
+            "tamper_free": is_intact,
+            "verified_at": utcnow().isoformat()
+        }
+

@@ -60,7 +60,7 @@ def get_timeline_events(
     risk_list = [r.strip() for r in risk.split(",") if r.strip()] if risk else None
 
     return timeline_service.query_timeline(
-        case_id=case_id,
+        case_id=target_case_id,
         entity_ids=entity_list,
         domains=domain_list,
         event_types=type_list,

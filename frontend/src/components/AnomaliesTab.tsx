@@ -4,17 +4,20 @@ import React, { useState, useEffect } from 'react';
 import { 
   AlertTriangle, Filter, Search, ShieldAlert, FileText, ChevronRight, 
   Play, Loader2, RefreshCw, Layers, CheckCircle2, ShieldCheck, Sparkles,
-  SlidersHorizontal, X, Activity, Radio, Cpu, Hash, ArrowRight, User
+  SlidersHorizontal, X, Activity, Radio, Cpu, Hash, ArrowRight, User,
+  Zap, Bell
 } from 'lucide-react';
 import { useCase } from '../context/CaseContext';
-import { apiClient, AnomalyFinding, AnomalyStats, DetectorEngineMeta } from '../services/apiClient';
+import { apiClient, AnomalyFinding, AnomalyStats, DetectorEngineMeta, CEPAlert } from '../services/apiClient';
+import { AlertTriageCard } from './AlertTriageCard';
 import { cn } from '../utils/cn';
 
 interface AnomaliesTabProps {
   onAnomalySelect: (anomaly: AnomalyFinding) => void;
+  onPivotToGraph?: (entityId: string) => void;
 }
 
-export default function AnomaliesTab({ onAnomalySelect }: AnomaliesTabProps) {
+export default function AnomaliesTab({ onAnomalySelect, onPivotToGraph }: AnomaliesTabProps) {
   const { activeCase } = useCase();
   const [stats, setStats] = useState<AnomalyStats>({ total: 0, critical: 0, high: 0, medium: 0, low: 0 });
   const [engines, setEngines] = useState<DetectorEngineMeta[]>([]);
@@ -25,8 +28,14 @@ export default function AnomaliesTab({ onAnomalySelect }: AnomaliesTabProps) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisStatusMessage, setAnalysisStatusMessage] = useState<string | null>(null);
 
-  // View Mode: 'findings' (default) vs 'signals' (raw sensor stream for audit)
-  const [viewMode, setViewMode] = useState<'findings' | 'signals'>('findings');
+  // View Mode: 'findings' (default) vs 'signals' vs 'alerts' (Feature 8)
+  const [viewMode, setViewMode] = useState<'findings' | 'signals' | 'alerts'>('findings');
+
+  // CEP Alerts state (Feature 8)
+  const [alerts, setAlerts] = useState<CEPAlert[]>([]);
+  const [alertsLoading, setAlertsLoading] = useState(false);
+  const [selectedAlertStatus, setSelectedAlertStatus] = useState<string>('ALL');
+  const [isEvaluatingAlerts, setIsEvaluatingAlerts] = useState(false);
 
   // Filters
   const [search, setSearch] = useState('');
@@ -92,6 +101,43 @@ export default function AnomaliesTab({ onAnomalySelect }: AnomaliesTabProps) {
     }
   };
 
+  const fetchAlerts = async () => {
+    if (!activeCase?.case_id) return;
+    setAlertsLoading(true);
+    try {
+      const res = await apiClient.getAlerts(activeCase.case_id, selectedAlertStatus);
+      setAlerts(res.alerts || []);
+    } catch (err) {
+      console.error('Failed to fetch alerts:', err);
+    } finally {
+      setAlertsLoading(false);
+    }
+  };
+
+  const handleEvaluateAlerts = async () => {
+    if (!activeCase?.case_id) return;
+    setIsEvaluatingAlerts(true);
+    try {
+      const res = await apiClient.evaluateAlerts(activeCase.case_id);
+      setAlerts(res.alerts || []);
+      setAnalysisStatusMessage(`CEP Engine evaluated ${res.alerts?.length || 0} cross-domain trigger patterns.`);
+      setTimeout(() => setAnalysisStatusMessage(null), 8000);
+    } catch (err: any) {
+      setAnalysisStatusMessage(`CEP Evaluation error: ${err.message}`);
+    } finally {
+      setIsEvaluatingAlerts(false);
+    }
+  };
+
+  const handleTriageAlert = async (alertId: string, status: 'INVESTIGATING' | 'ASSIGNED' | 'DISMISSED') => {
+    try {
+      await apiClient.triageAlert(alertId, status);
+      setAlerts(prev => prev.map(a => a.alert_id === alertId ? { ...a, status } : a));
+    } catch (err) {
+      console.error('Failed to triage alert:', err);
+    }
+  };
+
   useEffect(() => {
     fetchStats();
     fetchHealth();
@@ -104,7 +150,10 @@ export default function AnomaliesTab({ onAnomalySelect }: AnomaliesTabProps) {
     if (viewMode === 'signals') {
       fetchSignals();
     }
-  }, [search, activeCase?.case_id, viewMode]);
+    if (viewMode === 'alerts') {
+      fetchAlerts();
+    }
+  }, [search, activeCase?.case_id, viewMode, selectedAlertStatus]);
 
   const handleRunAnalysis = async () => {
     setIsAnalyzing(true);
@@ -181,7 +230,7 @@ export default function AnomaliesTab({ onAnomalySelect }: AnomaliesTabProps) {
   };
 
   return (
-    <div className="flex flex-col h-full bg-background p-3 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full overflow-y-auto">
+    <div className="flex flex-col h-full bg-background p-6 md:p-8 max-w-7xl mx-auto w-full overflow-y-auto">
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 border-b border-border pb-5">
         <div>
@@ -196,16 +245,16 @@ export default function AnomaliesTab({ onAnomalySelect }: AnomaliesTabProps) {
               </span>
             )}
           </div>
-          <h2 className="text-xl sm:text-2xl font-black text-foreground flex items-center gap-2.5">
-            <ShieldAlert className="w-6 h-6 text-destructive flex-shrink-0" />
-            <span>Investigative Findings & Anomaly Radar</span>
+          <h2 className="text-2xl font-black text-foreground flex items-center gap-2.5">
+            <ShieldAlert className="w-6 h-6 text-destructive" />
+            Investigative Findings & Anomaly Radar
           </h2>
           <p className="text-xs text-muted-foreground mt-1 max-w-3xl leading-relaxed">
             Multi-lens intelligence transforming 21 algorithmic detectors into coherent, evidence-backed findings for law enforcement and fraud intelligence officers.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-3">
           {/* Mode Switcher */}
           <div className="flex items-center bg-secondary p-1 rounded-lg border border-border text-xs font-semibold">
             <button
@@ -219,6 +268,22 @@ export default function AnomaliesTab({ onAnomalySelect }: AnomaliesTabProps) {
             >
               <FileText className="w-3.5 h-3.5 text-primary" />
               Findings ({anomalies.length})
+            </button>
+            <button
+              onClick={() => {
+                setViewMode('alerts');
+                fetchAlerts();
+              }}
+              className={cn(
+                "px-3 py-1.5 rounded-md transition-all flex items-center gap-1.5",
+                viewMode === 'alerts'
+                  ? "bg-card text-rose-500 shadow-sm font-bold"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              title="Automated Complex Event Processing (CEP) cross-domain alerts"
+            >
+              <Zap className="w-3.5 h-3.5 text-rose-500" />
+              Automated CEP Alerts ({alerts.length})
             </button>
             <button
               onClick={() => {
@@ -239,101 +304,125 @@ export default function AnomaliesTab({ onAnomalySelect }: AnomaliesTabProps) {
           </div>
 
           <button
-            onClick={fetchAnomalies}
-            disabled={loading}
+            onClick={() => {
+              if (viewMode === 'alerts') fetchAlerts();
+              else if (viewMode === 'signals') fetchSignals();
+              else fetchAnomalies();
+            }}
+            disabled={loading || alertsLoading}
             className="p-2 text-muted-foreground hover:text-foreground bg-secondary border border-border rounded-lg hover:bg-secondary/80 transition-colors"
-            title="Refresh Findings"
+            title="Refresh View"
           >
-            <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
+            <RefreshCw className={cn("w-4 h-4", (loading || alertsLoading) && "animate-spin")} />
           </button>
 
-          <button
-            onClick={handleRunAnalysis}
-            disabled={isAnalyzing}
-            className="px-4 py-2 bg-destructive text-destructive-foreground text-xs font-bold rounded-lg hover:bg-destructive/90 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
-          >
-            {isAnalyzing ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Executing Pipeline...
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4" />
-                Run Intelligence Analysis
-              </>
-            )}
-          </button>
+          {viewMode === 'alerts' ? (
+            <button
+              onClick={handleEvaluateAlerts}
+              disabled={isEvaluatingAlerts}
+              className="px-4 py-2 bg-rose-600 text-white text-xs font-bold rounded-lg hover:bg-rose-700 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer"
+            >
+              {isEvaluatingAlerts ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Evaluating CEP Triggers...
+                </>
+              ) : (
+                <>
+                  <Zap className="w-4 h-4" />
+                  Evaluate CEP Triggers
+                </>
+              )}
+            </button>
+          ) : (
+            <button
+              onClick={handleRunAnalysis}
+              disabled={isAnalyzing}
+              className="px-4 py-2 bg-destructive text-destructive-foreground text-xs font-bold rounded-lg hover:bg-destructive/90 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer"
+            >
+              {isAnalyzing ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Executing Pipeline...
+                </>
+              ) : (
+                <>
+                  <Play className="w-4 h-4" />
+                  Run Intelligence Analysis
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
 
       {analysisStatusMessage && (
-        <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-primary/10 border border-primary/20 rounded-xl text-xs text-primary flex items-center gap-2 shadow-sm animate-in fade-in">
+        <div className="mb-6 p-4 bg-primary/10 border border-primary/20 rounded-xl text-xs text-primary flex items-center gap-2 shadow-sm animate-in fade-in">
           <Sparkles className="w-4 h-4 flex-shrink-0" />
           <span>{analysisStatusMessage}</span>
         </div>
       )}
 
       {/* KPI Stats Strip */}
-      <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-4 mb-4 sm:mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-6">
         <div 
           onClick={() => setSelectedSeverity('ALL')}
           className={cn(
-            "bg-card border p-2.5 sm:p-4 rounded-xl shadow-sm text-center cursor-pointer transition-all hover:border-primary/50",
+            "bg-card border p-4 rounded-xl shadow-sm text-center cursor-pointer transition-all hover:border-primary/50",
             selectedSeverity === 'ALL' ? "border-primary ring-1 ring-primary" : "border-border"
           )}
         >
-          <div className="text-xl sm:text-2xl font-black text-foreground mb-1">{stats.total}</div>
+          <div className="text-2xl font-black text-foreground mb-1">{stats.total}</div>
           <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Findings Total</div>
         </div>
 
         <div 
           onClick={() => setSelectedSeverity('CRITICAL')}
           className={cn(
-            "bg-destructive/5 border p-2.5 sm:p-4 rounded-xl shadow-sm text-center cursor-pointer transition-all hover:border-destructive/50",
+            "bg-destructive/5 border p-4 rounded-xl shadow-sm text-center cursor-pointer transition-all hover:border-destructive/50",
             selectedSeverity === 'CRITICAL' ? "border-destructive ring-1 ring-destructive" : "border-destructive/20"
           )}
         >
-          <div className="text-xl sm:text-2xl font-black text-destructive mb-1">{stats.critical}</div>
+          <div className="text-2xl font-black text-destructive mb-1">{stats.critical}</div>
           <div className="text-[10px] font-bold text-destructive uppercase tracking-widest">Critical</div>
         </div>
 
         <div 
           onClick={() => setSelectedSeverity('HIGH')}
           className={cn(
-            "bg-orange-500/5 border p-2.5 sm:p-4 rounded-xl shadow-sm text-center cursor-pointer transition-all hover:border-orange-500/50",
+            "bg-orange-500/5 border p-4 rounded-xl shadow-sm text-center cursor-pointer transition-all hover:border-orange-500/50",
             selectedSeverity === 'HIGH' ? "border-orange-500 ring-1 ring-orange-500" : "border-orange-500/20"
           )}
         >
-          <div className="text-xl sm:text-2xl font-black text-orange-500 mb-1">{stats.high}</div>
+          <div className="text-2xl font-black text-orange-500 mb-1">{stats.high}</div>
           <div className="text-[10px] font-bold text-orange-500 uppercase tracking-widest">High</div>
         </div>
 
         <div 
           onClick={() => setSelectedSeverity('MEDIUM')}
           className={cn(
-            "bg-amber-500/5 border p-2.5 sm:p-4 rounded-xl shadow-sm text-center cursor-pointer transition-all hover:border-amber-500/50",
+            "bg-amber-500/5 border p-4 rounded-xl shadow-sm text-center cursor-pointer transition-all hover:border-amber-500/50",
             selectedSeverity === 'MEDIUM' ? "border-amber-500 ring-1 ring-amber-500" : "border-amber-500/20"
           )}
         >
-          <div className="text-xl sm:text-2xl font-black text-amber-500 mb-1">{stats.medium}</div>
+          <div className="text-2xl font-black text-amber-500 mb-1">{stats.medium}</div>
           <div className="text-[10px] font-bold text-amber-500 uppercase tracking-widest">Medium</div>
         </div>
 
         <div 
           onClick={() => setSelectedSeverity('LOW')}
           className={cn(
-            "bg-blue-500/5 border p-2.5 sm:p-4 rounded-xl shadow-sm text-center cursor-pointer transition-all hover:border-blue-500/50",
+            "bg-blue-500/5 border p-4 rounded-xl shadow-sm text-center cursor-pointer transition-all hover:border-blue-500/50",
             selectedSeverity === 'LOW' ? "border-blue-500 ring-1 ring-blue-500" : "border-blue-500/20"
           )}
         >
-          <div className="text-xl sm:text-2xl font-black text-blue-500 mb-1">{stats.low}</div>
+          <div className="text-2xl font-black text-blue-500 mb-1">{stats.low}</div>
           <div className="text-[10px] font-bold text-blue-500 uppercase tracking-widest">Low</div>
         </div>
       </div>
 
       {/* Filter Toolbar */}
-      <div className="bg-card border border-border rounded-xl p-3 sm:p-4 mb-4 sm:mb-6 shadow-sm flex flex-col md:flex-row gap-3 sm:gap-4 items-center justify-between">
+      <div className="bg-card border border-border rounded-xl p-4 mb-6 shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
         <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
           {/* Severity Dropdown */}
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -454,7 +543,7 @@ export default function AnomaliesTab({ onAnomalySelect }: AnomaliesTabProps) {
                 <div
                   key={a.id}
                   onClick={() => onAnomalySelect(a)}
-                  className="bg-card border border-border p-4 sm:p-6 rounded-xl hover:border-primary/50 transition-all cursor-pointer shadow-sm relative group flex flex-col md:flex-row md:items-start justify-between gap-4 sm:gap-6"
+                  className="bg-card border border-border p-6 rounded-xl hover:border-primary/50 transition-all cursor-pointer shadow-sm relative group flex flex-col md:flex-row md:items-start justify-between gap-6"
                 >
                   <div className="space-y-3.5 flex-1 min-w-0">
                     {/* Badges Row */}
@@ -596,7 +685,7 @@ export default function AnomaliesTab({ onAnomalySelect }: AnomaliesTabProps) {
             })
           )}
         </div>
-      ) : (
+      ) : viewMode === 'signals' ? (
         /* RAW SIGNALS STREAM VIEW (For Auditing & Model Inspection) */
         <div className="flex-1 space-y-3">
           <div className="p-3 bg-secondary/50 rounded-xl border border-border text-xs text-muted-foreground flex items-center justify-between">
@@ -651,6 +740,73 @@ export default function AnomaliesTab({ onAnomalySelect }: AnomaliesTabProps) {
                 </div>
               </div>
             ))
+          )}
+        </div>
+      ) : (
+        /* AUTOMATED CEP ALERTS VIEW (Feature 8) */
+        <div className="flex-1 space-y-4">
+          {/* Status Filter Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-card border border-border rounded-xl shadow-xs">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Status:</span>
+              <div className="flex items-center gap-1 bg-secondary/70 p-0.5 rounded-lg border border-border">
+                {['ALL', 'PENDING', 'INVESTIGATING', 'ASSIGNED', 'DISMISSED'].map(st => (
+                  <button
+                    key={st}
+                    onClick={() => setSelectedAlertStatus(st)}
+                    className={cn(
+                      "px-2.5 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer",
+                      selectedAlertStatus === st
+                        ? "bg-primary text-primary-foreground shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    {st}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span className="font-bold text-foreground">{alerts.length}</span> Active Alerts in Case
+            </div>
+          </div>
+
+          {/* Alerts List */}
+          {alertsLoading ? (
+            <div className="p-12 text-center text-xs text-muted-foreground flex flex-col items-center justify-center gap-2">
+              <Loader2 className="w-6 h-6 animate-spin text-primary" />
+              <span>Querying CEP sliding-window triggers...</span>
+            </div>
+          ) : alerts.length === 0 ? (
+            <div className="p-12 text-center space-y-3 bg-secondary/20 border-2 border-dashed border-border rounded-2xl">
+              <div className="w-12 h-12 rounded-full bg-rose-500/10 text-rose-500 mx-auto flex items-center justify-center">
+                <Zap className="w-6 h-6" />
+              </div>
+              <div className="text-sm font-bold text-foreground">No Automated CEP Alerts Active</div>
+              <p className="text-xs text-muted-foreground max-w-md mx-auto">
+                No cross-domain burst collisions or spatio-temporal jumps are currently flagged under status '{selectedAlertStatus}'.
+              </p>
+              <button
+                type="button"
+                onClick={handleEvaluateAlerts}
+                disabled={isEvaluatingAlerts}
+                className="px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold rounded-xl shadow-sm transition-all cursor-pointer"
+              >
+                Run Multi-Source CEP Evaluation
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4">
+              {alerts.map(a => (
+                <AlertTriageCard
+                  key={a.alert_id}
+                  alert={a}
+                  onTriage={handleTriageAlert}
+                  onPivotToGraph={onPivotToGraph}
+                />
+              ))}
+            </div>
           )}
         </div>
       )}

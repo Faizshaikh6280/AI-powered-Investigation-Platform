@@ -6,6 +6,7 @@ from typing import List, Dict, Any
 from app.schemas.canonical_event import (
     CanonicalEvent, CanonicalEntities, CanonicalTelemetry, CanonicalFinancial, EventProvenance
 )
+from app.ingestion.synonyms import extract_canonical_fields, clean_name
 from app.ingestion.parsers.base import BaseParser
 
 class KYCParser(BaseParser):
@@ -41,14 +42,15 @@ class KYCParser(BaseParser):
         current_time = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         for idx, row in enumerate(rows, start=1):
-            phone = self.clean_phone(row.get("phone") or row.get("mobile"))
-            name = row.get("full_name") or row.get("name")
-            national_id = str(row.get("national_id") or row.get("aadhar") or row.get("id_number") or "").strip()
-            email = str(row.get("email")).strip() if row.get("email") else None
-            address = str(row.get("address")).strip() if row.get("address") else None
-
-            account_num = str(row.get("account") or row.get("account_number") or row.get("bank_account") or "").strip() or None
+            canon = extract_canonical_fields(row)
+            phone = self.clean_phone(canon["phone"] or row.get("phone") or row.get("mobile"))
+            name = canon["name"] or clean_name(row.get("full_name") or row.get("name"))
+            national_id = canon["national_id"] or str(row.get("national_id") or row.get("aadhar") or row.get("id_number") or "").strip() or None
+            email = canon["email"] or (str(row.get("email")).strip() if row.get("email") else None)
+            address = canon["address"] or (str(row.get("address")).strip() if row.get("address") else None)
+            account_num = canon["account"] or str(row.get("account") or row.get("account_number") or row.get("bank_account") or "").strip() or None
             dob = str(row.get("date_of_birth") or row.get("dob") or "").strip() or None
+            aliases = canon["aliases"]
 
             entities = CanonicalEntities(
                 name=name,
@@ -72,6 +74,9 @@ class KYCParser(BaseParser):
                 "data_source": row.get("data_source", "KYC"),
                 "occupation": row.get("occupation")
             }
+            if aliases:
+                attributes["known_aliases"] = aliases
+
 
             provenance = EventProvenance(
                 case_id=case_id,
