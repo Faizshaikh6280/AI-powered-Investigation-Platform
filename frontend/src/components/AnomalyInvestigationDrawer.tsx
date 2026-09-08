@@ -57,30 +57,36 @@ export default function AnomalyInvestigationDrawer({
   const caseRel = anomaly.caseRelevance || 'HIGH';
 
   return (
-    <div className="fixed inset-y-0 right-0 w-full sm:w-[600px] bg-background border-l border-border shadow-2xl z-40 flex flex-col animate-in slide-in-from-right duration-300">
-      {/* Drawer Header */}
-      <div className="flex items-center justify-between p-5 border-b border-border bg-card">
-        <div className="flex items-center gap-3">
-          <div className={cn("p-2 rounded-lg border", getSeverityBadge(anomaly.severity))}>
-            <ShieldAlert className="w-5 h-5" />
+    <>
+      {/* Mobile Backdrop */}
+      <div 
+        onClick={onClose}
+        className="fixed inset-0 bg-black/60 z-35 md:hidden backdrop-blur-xs" 
+      />
+      <div className="fixed inset-y-0 right-0 w-full sm:w-[600px] bg-background border-l border-border shadow-2xl z-40 flex flex-col animate-in slide-in-from-right duration-300">
+        {/* Drawer Header */}
+        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-border bg-card">
+          <div className="flex items-center gap-3">
+            <div className={cn("p-2 rounded-lg border", getSeverityBadge(anomaly.severity))}>
+              <ShieldAlert className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-foreground text-sm leading-tight">
+                {anomaly.title || 'Investigative Intelligence Finding'}
+              </h3>
+              <span className="text-[11px] font-mono text-muted-foreground">{anomaly.id}</span>
+            </div>
           </div>
-          <div>
-            <h3 className="font-bold text-foreground text-sm leading-tight">
-              {anomaly.title || 'Investigative Intelligence Finding'}
-            </h3>
-            <span className="text-[11px] font-mono text-muted-foreground">{anomaly.id}</span>
-          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 text-muted-foreground hover:text-foreground rounded-lg hover:bg-secondary transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
-        <button
-          onClick={onClose}
-          className="p-1.5 text-muted-foreground hover:text-foreground rounded-lg hover:bg-secondary transition-colors"
-        >
-          <X className="w-5 h-5" />
-        </button>
-      </div>
 
-      {/* Drawer Content */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        {/* Drawer Content */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Target Entity Overview Card */}
         <div className="bg-card border border-border p-5 rounded-xl space-y-4 shadow-sm">
           <div className="flex items-start justify-between gap-4">
@@ -460,7 +466,8 @@ export default function AnomalyInvestigationDrawer({
         </div>
       </div>
     </div>
-  );
+  </>
+);
 }
 
 export { AnomalyInvestigationDrawer };

@@ -4,8 +4,8 @@
  */
 
 const API_BASE = typeof window !== 'undefined'
-  ? `${window.location.protocol}//${window.location.hostname}:8000`
-  : (process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000');
+  ? ''
+  : (process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000');
 
 // ==========================================
 // IDENTITY & ACCESS MANAGEMENT (IAM) TYPES
@@ -23,7 +23,7 @@ export interface UserProfile {
   unit?: string;
   unit_code?: string;
   organization?: string;
-  status: 'ACTIVE' | 'SUSPENDED' | 'DISABLED';
+  status: 'ACTIVE' | 'SUSPENDED' | 'DISABLED' | 'PENDING_APPROVAL' | 'REJECTED';
   mfa_enabled: boolean;
   last_login_at?: string;
 }
@@ -57,9 +57,11 @@ export interface UserSession {
 export interface AuditLogEntry {
   id: number;
   audit_id: string;
+  audit_event_id?: string;
   timestamp: string;
   user_id?: string;
   actor: string;
+  actor_type?: string;
   role?: string;
   organization_id?: string;
   unit_id?: string;
@@ -69,12 +71,59 @@ export interface AuditLogEntry {
   resource_type?: string;
   resource_id?: string;
   result: string;
+  decision?: string;
+  reason_code?: string;
   reason?: string;
+  session_id?: string;
   ip_address?: string;
   user_agent?: string;
+  endpoint?: string;
+  http_method?: string;
   details?: Record<string, any>;
+  previous_state_hash?: string;
+  new_state_hash?: string;
+  event_hash?: string;
+  previous_event_hash?: string;
+  audit_schema_version?: number;
+  created_at?: string;
   request_id?: string;
   correlation_id?: string;
+}
+
+export interface AuditStats {
+  total_events: number;
+  denied_actions: number;
+  evidence_exports: number;
+  evidence_downloads: number;
+  finding_approvals: number;
+  admin_changes: number;
+  auth_failures: number;
+  recent_security_events: Array<{
+    audit_id: string;
+    timestamp: string;
+    actor: string;
+    role?: string;
+    action: string;
+    case_id?: string;
+    result: string;
+    reason?: string;
+    ip_address?: string;
+  }>;
+}
+
+export interface AuditVerifyResult {
+  status: 'VALID' | 'INTEGRITY_ANOMALY_DETECTED';
+  records_checked: number;
+  chain_intact: boolean;
+  first_event_id?: string;
+  latest_event_id?: string;
+  latest_hash?: string;
+  anomalies: Array<{
+    id: number;
+    audit_event_id: string;
+    type: string;
+    message: string;
+  }>;
 }
 
 export interface NFCCardRecord {
@@ -1198,6 +1247,49 @@ export const apiClient = {
     return handleResponse<AuthStateResponse>(res);
   },
 
+  async register(payload: {
+    employee_id: string;
+    full_name: string;
+    official_email: string;
+    password: string;
+    role_name?: string;
+    unit_id?: string;
+    phone_number?: string;
+  }): Promise<AuthStateResponse> {
+    _apiCache.clear();
+    const res = await authFetch(`${API_BASE}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return handleResponse<AuthStateResponse>(res);
+  },
+
+  async verifyInvite(token: string): Promise<{
+    valid: boolean;
+    invitation_id: string;
+    official_email: string;
+    employee_id: string;
+    full_name: string;
+    role_name: string;
+    role_display: string;
+    unit_name: string;
+    expires_at: string;
+  }> {
+    const res = await authFetch(`${API_BASE}/api/auth/invite/verify?token=${encodeURIComponent(token)}`);
+    return handleResponse<any>(res);
+  },
+
+  async acceptInvite(payload: { token: string; password: string }): Promise<AuthStateResponse> {
+    _apiCache.clear();
+    const res = await authFetch(`${API_BASE}/api/auth/invite/accept`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return handleResponse<AuthStateResponse>(res);
+  },
+
   async verifyMfa(payload: { challenge_token: string; code: string; is_backup_code?: boolean }): Promise<AuthStateResponse> {
     _apiCache.clear();
     const res = await authFetch(`${API_BASE}/api/auth/mfa/verify`, {
@@ -1253,7 +1345,15 @@ export const apiClient = {
 
   // === ADMIN & USER MANAGEMENT ===
   async getUsers(params?: { unit_id?: string; role?: string; status?: string; search?: string }): Promise<{ users: UserProfile[] }> {
-    const query = new URLSearchParams(params as any || {}).toString();
+    const cleanParams: Record<string, string> = {};
+    if (params) {
+      for (const [k, v] of Object.entries(params)) {
+        if (v !== undefined && v !== null && v !== '' && v !== 'undefined') {
+          cleanParams[k] = String(v);
+        }
+      }
+    }
+    const query = new URLSearchParams(cleanParams).toString();
     const res = await authFetch(`${API_BASE}/api/admin/users${query ? `?${query}` : ''}`);
     return handleResponse<any>(res);
   },
@@ -1289,6 +1389,22 @@ export const apiClient = {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),
+    });
+    return handleResponse<any>(res);
+  },
+
+  async approveUser(userId: string): Promise<any> {
+    const res = await authFetch(`${API_BASE}/api/admin/users/${encodeURIComponent(userId)}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return handleResponse<any>(res);
+  },
+
+  async rejectUser(userId: string): Promise<any> {
+    const res = await authFetch(`${API_BASE}/api/admin/users/${encodeURIComponent(userId)}/reject`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
     });
     return handleResponse<any>(res);
   },
@@ -1330,7 +1446,15 @@ export const apiClient = {
     limit?: number;
     offset?: number;
   }): Promise<{ logs: AuditLogEntry[]; total: number; limit: number; offset: number }> {
-    const query = new URLSearchParams(params as any || {}).toString();
+    const searchParams = new URLSearchParams();
+    if (params) {
+      for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== null && value !== '' && value !== 'undefined') {
+          searchParams.append(key, String(value));
+        }
+      }
+    }
+    const query = searchParams.toString();
     const res = await authFetch(`${API_BASE}/api/audit/logs${query ? `?${query}` : ''}`);
     return handleResponse<any>(res);
   },
@@ -1340,12 +1464,66 @@ export const apiClient = {
     return handleResponse<AuditLogEntry>(res);
   },
 
+  async getAuditStats(): Promise<AuditStats> {
+    const res = await authFetch(`${API_BASE}/api/audit/stats`);
+    return handleResponse<AuditStats>(res);
+  },
+
+  async verifyAuditChain(limit: number = 5000): Promise<AuditVerifyResult> {
+    const res = await authFetch(`${API_BASE}/api/audit/verify?limit=${limit}`);
+    return handleResponse<AuditVerifyResult>(res);
+  },
+
+  async getCaseActivityTimeline(caseId: string, actionFilter?: string): Promise<{ case_id: string; total_records: number; activities: any[] }> {
+    const query = actionFilter ? `?action_filter=${encodeURIComponent(actionFilter)}` : '';
+    const res = await authFetch(`${API_BASE}/api/audit/cases/${encodeURIComponent(caseId)}/timeline${query}`);
+    return handleResponse<any>(res);
+  },
+
+  async getUserActivity(userId: string): Promise<any> {
+    const res = await authFetch(`${API_BASE}/api/audit/users/${encodeURIComponent(userId)}/activity`);
+    return handleResponse<any>(res);
+  },
+
   async exportAuditLogs(format: string = 'csv'): Promise<Blob> {
     const res = await authFetch(`${API_BASE}/api/audit/export?format=${encodeURIComponent(format)}`);
     if (!res.ok) {
       throw new Error(`Audit Export Failed (${res.status}): ${res.statusText}`);
     }
     return res.blob();
+  },
+
+  // === EVIDENCE FORENSIC OPERATIONS ===
+  async downloadEvidence(evidenceId: string): Promise<Blob> {
+    const res = await authFetch(`${API_BASE}/api/cases/evidence/${encodeURIComponent(evidenceId)}/download`);
+    if (!res.ok) {
+      throw new Error(`Evidence Download Failed (${res.status}): ${res.statusText}`);
+    }
+    return res.blob();
+  },
+
+  async exportEvidence(evidenceId: string): Promise<any> {
+    const res = await authFetch(`${API_BASE}/api/cases/evidence/${encodeURIComponent(evidenceId)}/export`);
+    return handleResponse<any>(res);
+  },
+
+  // === ENTITY RESOLUTION MERGE & SPLIT ===
+  async mergeEntities(payload: { case_id: string; target_cluster_id: string; source_cluster_ids: string[]; reason?: string }): Promise<any> {
+    const res = await authFetch(`${API_BASE}/api/zingg/merge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return handleResponse<any>(res);
+  },
+
+  async splitEntities(payload: { case_id: string; cluster_id: string; new_cluster_id: string; primary_name?: string; detached_phones?: string[]; detached_accounts?: string[]; detached_emails?: string[]; reason?: string }): Promise<any> {
+    const res = await authFetch(`${API_BASE}/api/zingg/split`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return handleResponse<any>(res);
   },
 
   // === CASE MEMBERSHIP ===
@@ -1618,6 +1796,7 @@ export interface GeoInvestigationResponse {
   density_grid: ActivityDensityCell[];
   story_cards: SpatialStoryCard[];
   summary_metrics: Record<string, any>;
+  trips_waypoints?: any[];
 }
 
 // ==========================================

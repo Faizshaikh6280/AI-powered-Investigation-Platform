@@ -53,7 +53,7 @@ export default function InviteOfficerModal({ isOpen, onClose, onSuccess, roles, 
       <div className="relative w-full max-w-lg bg-card border border-border rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         <div className="h-1 bg-gradient-to-r from-primary to-indigo-500" />
 
-        <div className="p-6">
+        <div className="p-4 sm:p-6 max-h-[92vh] sm:max-h-[85vh] overflow-y-auto">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2.5">
               <div className="p-2 bg-primary/10 rounded-lg text-primary">
@@ -138,7 +138,7 @@ export default function InviteOfficerModal({ isOpen, onClose, onSuccess, roles, 
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-muted-foreground uppercase mb-1">
                     Assigned Rank *

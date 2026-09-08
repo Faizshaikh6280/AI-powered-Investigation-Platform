@@ -135,29 +135,54 @@ class GoldenProfileModel(Base):
 
 
 class AuditLogModel(Base):
-    """Tamper-evident audit log for chain of custody, security, and investigative actions."""
+    """Tamper-evident, cryptographically verifiable audit log for chain of custody, security, and investigative actions."""
     __tablename__ = "audit_logs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     audit_id = Column(String(64), unique=True, nullable=True, index=True)
+    audit_event_id = Column(String(64), unique=True, nullable=True, index=True)
     timestamp = Column(DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    
+    # Actor identity
     user_id = Column(String(64), nullable=True, index=True)
     actor = Column(String(128), default="SYSTEM", nullable=False, index=True)
+    actor_type = Column(String(32), default="HUMAN_USER", nullable=False, index=True)  # HUMAN_USER, SYSTEM_SERVICE, AUTOMATED_JOB
     role = Column(String(64), nullable=True, index=True)
     organization_id = Column(String(64), nullable=True, index=True)
     unit_id = Column(String(64), nullable=True, index=True)
+    
+    # Case & Resource Scope
     case_id = Column(String(64), nullable=True, index=True)
     evidence_id = Column(String(64), nullable=True, index=True)
     action = Column(String(128), nullable=False, index=True)
     resource_type = Column(String(64), nullable=True, index=True)
     resource_id = Column(String(128), nullable=True, index=True)
-    result = Column(String(32), default="SUCCESS", nullable=False, index=True)  # SUCCESS, DENIED, FAILED
+    
+    # Outcome & Evaluation
+    result = Column(String(32), default="SUCCESS", nullable=False, index=True)  # SUCCESS, DENIED, FAILED, PARTIAL
+    decision = Column(String(32), default="ALLOWED", nullable=False, index=True)  # ALLOWED, DENIED, ERROR
+    reason_code = Column(String(64), nullable=True, index=True)
     reason = Column(Text, nullable=True)
-    ip_address = Column(String(64), nullable=True)
-    user_agent = Column(String(512), nullable=True)
-    details = Column(JSON, nullable=True)
+    
+    # Session & HTTP Request Traceability
     request_id = Column(String(64), nullable=True, index=True)
     correlation_id = Column(String(64), nullable=True, index=True)
+    session_id = Column(String(128), nullable=True, index=True)
+    ip_address = Column(String(64), nullable=True)
+    user_agent = Column(String(512), nullable=True)
+    endpoint = Column(String(255), nullable=True)
+    http_method = Column(String(16), nullable=True)
+    
+    # Payload & Forensic Integrity
+    details = Column(JSON, nullable=True)
+    previous_state_hash = Column(String(64), nullable=True)
+    new_state_hash = Column(String(64), nullable=True)
+    
+    # Cryptographic Hash Chain
+    event_hash = Column(String(64), nullable=True, index=True)
+    previous_event_hash = Column(String(64), nullable=True, index=True)
+    audit_schema_version = Column(Integer, default=1, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
 class DetectionSignalModel(Base):

@@ -181,7 +181,7 @@ export default function AnomaliesTab({ onAnomalySelect }: AnomaliesTabProps) {
   };
 
   return (
-    <div className="flex flex-col h-full bg-background p-6 md:p-8 max-w-7xl mx-auto w-full overflow-y-auto">
+    <div className="flex flex-col h-full bg-background p-3 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full overflow-y-auto">
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 border-b border-border pb-5">
         <div>
@@ -196,16 +196,16 @@ export default function AnomaliesTab({ onAnomalySelect }: AnomaliesTabProps) {
               </span>
             )}
           </div>
-          <h2 className="text-2xl font-black text-foreground flex items-center gap-2.5">
-            <ShieldAlert className="w-6 h-6 text-destructive" />
-            Investigative Findings & Anomaly Radar
+          <h2 className="text-xl sm:text-2xl font-black text-foreground flex items-center gap-2.5">
+            <ShieldAlert className="w-6 h-6 text-destructive flex-shrink-0" />
+            <span>Investigative Findings & Anomaly Radar</span>
           </h2>
           <p className="text-xs text-muted-foreground mt-1 max-w-3xl leading-relaxed">
             Multi-lens intelligence transforming 21 algorithmic detectors into coherent, evidence-backed findings for law enforcement and fraud intelligence officers.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           {/* Mode Switcher */}
           <div className="flex items-center bg-secondary p-1 rounded-lg border border-border text-xs font-semibold">
             <button
@@ -268,72 +268,72 @@ export default function AnomaliesTab({ onAnomalySelect }: AnomaliesTabProps) {
       </div>
 
       {analysisStatusMessage && (
-        <div className="mb-6 p-4 bg-primary/10 border border-primary/20 rounded-xl text-xs text-primary flex items-center gap-2 shadow-sm animate-in fade-in">
+        <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-primary/10 border border-primary/20 rounded-xl text-xs text-primary flex items-center gap-2 shadow-sm animate-in fade-in">
           <Sparkles className="w-4 h-4 flex-shrink-0" />
           <span>{analysisStatusMessage}</span>
         </div>
       )}
 
       {/* KPI Stats Strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-6">
+      <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-4 mb-4 sm:mb-6">
         <div 
           onClick={() => setSelectedSeverity('ALL')}
           className={cn(
-            "bg-card border p-4 rounded-xl shadow-sm text-center cursor-pointer transition-all hover:border-primary/50",
+            "bg-card border p-2.5 sm:p-4 rounded-xl shadow-sm text-center cursor-pointer transition-all hover:border-primary/50",
             selectedSeverity === 'ALL' ? "border-primary ring-1 ring-primary" : "border-border"
           )}
         >
-          <div className="text-2xl font-black text-foreground mb-1">{stats.total}</div>
+          <div className="text-xl sm:text-2xl font-black text-foreground mb-1">{stats.total}</div>
           <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Findings Total</div>
         </div>
 
         <div 
           onClick={() => setSelectedSeverity('CRITICAL')}
           className={cn(
-            "bg-destructive/5 border p-4 rounded-xl shadow-sm text-center cursor-pointer transition-all hover:border-destructive/50",
+            "bg-destructive/5 border p-2.5 sm:p-4 rounded-xl shadow-sm text-center cursor-pointer transition-all hover:border-destructive/50",
             selectedSeverity === 'CRITICAL' ? "border-destructive ring-1 ring-destructive" : "border-destructive/20"
           )}
         >
-          <div className="text-2xl font-black text-destructive mb-1">{stats.critical}</div>
+          <div className="text-xl sm:text-2xl font-black text-destructive mb-1">{stats.critical}</div>
           <div className="text-[10px] font-bold text-destructive uppercase tracking-widest">Critical</div>
         </div>
 
         <div 
           onClick={() => setSelectedSeverity('HIGH')}
           className={cn(
-            "bg-orange-500/5 border p-4 rounded-xl shadow-sm text-center cursor-pointer transition-all hover:border-orange-500/50",
+            "bg-orange-500/5 border p-2.5 sm:p-4 rounded-xl shadow-sm text-center cursor-pointer transition-all hover:border-orange-500/50",
             selectedSeverity === 'HIGH' ? "border-orange-500 ring-1 ring-orange-500" : "border-orange-500/20"
           )}
         >
-          <div className="text-2xl font-black text-orange-500 mb-1">{stats.high}</div>
+          <div className="text-xl sm:text-2xl font-black text-orange-500 mb-1">{stats.high}</div>
           <div className="text-[10px] font-bold text-orange-500 uppercase tracking-widest">High</div>
         </div>
 
         <div 
           onClick={() => setSelectedSeverity('MEDIUM')}
           className={cn(
-            "bg-amber-500/5 border p-4 rounded-xl shadow-sm text-center cursor-pointer transition-all hover:border-amber-500/50",
+            "bg-amber-500/5 border p-2.5 sm:p-4 rounded-xl shadow-sm text-center cursor-pointer transition-all hover:border-amber-500/50",
             selectedSeverity === 'MEDIUM' ? "border-amber-500 ring-1 ring-amber-500" : "border-amber-500/20"
           )}
         >
-          <div className="text-2xl font-black text-amber-500 mb-1">{stats.medium}</div>
+          <div className="text-xl sm:text-2xl font-black text-amber-500 mb-1">{stats.medium}</div>
           <div className="text-[10px] font-bold text-amber-500 uppercase tracking-widest">Medium</div>
         </div>
 
         <div 
           onClick={() => setSelectedSeverity('LOW')}
           className={cn(
-            "bg-blue-500/5 border p-4 rounded-xl shadow-sm text-center cursor-pointer transition-all hover:border-blue-500/50",
+            "bg-blue-500/5 border p-2.5 sm:p-4 rounded-xl shadow-sm text-center cursor-pointer transition-all hover:border-blue-500/50",
             selectedSeverity === 'LOW' ? "border-blue-500 ring-1 ring-blue-500" : "border-blue-500/20"
           )}
         >
-          <div className="text-2xl font-black text-blue-500 mb-1">{stats.low}</div>
+          <div className="text-xl sm:text-2xl font-black text-blue-500 mb-1">{stats.low}</div>
           <div className="text-[10px] font-bold text-blue-500 uppercase tracking-widest">Low</div>
         </div>
       </div>
 
       {/* Filter Toolbar */}
-      <div className="bg-card border border-border rounded-xl p-4 mb-6 shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
+      <div className="bg-card border border-border rounded-xl p-3 sm:p-4 mb-4 sm:mb-6 shadow-sm flex flex-col md:flex-row gap-3 sm:gap-4 items-center justify-between">
         <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
           {/* Severity Dropdown */}
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -454,7 +454,7 @@ export default function AnomaliesTab({ onAnomalySelect }: AnomaliesTabProps) {
                 <div
                   key={a.id}
                   onClick={() => onAnomalySelect(a)}
-                  className="bg-card border border-border p-6 rounded-xl hover:border-primary/50 transition-all cursor-pointer shadow-sm relative group flex flex-col md:flex-row md:items-start justify-between gap-6"
+                  className="bg-card border border-border p-4 sm:p-6 rounded-xl hover:border-primary/50 transition-all cursor-pointer shadow-sm relative group flex flex-col md:flex-row md:items-start justify-between gap-4 sm:gap-6"
                 >
                   <div className="space-y-3.5 flex-1 min-w-0">
                     {/* Badges Row */}

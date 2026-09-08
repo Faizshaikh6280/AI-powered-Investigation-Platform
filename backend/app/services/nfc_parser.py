@@ -24,13 +24,14 @@ PARSER_VERSION = "v2.0-forensic"
 UNSAFE_URL_SCHEMES = ("javascript:", "data:", "file:", "vbscript:", "blob:")
 
 # Standard regex patterns
-PHONE_PATTERN = re.compile(r"(?:(?:\+91|91|0)?[6-9]\d{9})|(?:\+\d{1,3}[\s-]?\d{7,14})")
+PHONE_PATTERN = re.compile(r"(?<![a-zA-Z0-9])(?:(?:\+91|91|0)?[6-9]\d{9})(?![a-zA-Z0-9])|(?:\+\d{1,3}[\s-]?\d{7,14})")
 EMAIL_PATTERN = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b")
 URL_PATTERN = re.compile(r"https?://[^\s/$.?#].[^\s]*", re.IGNORECASE)
 SOCIAL_HANDLE_PATTERN = re.compile(r"(?<!\w)@([a-zA-Z0-9_.-]{3,30})\b")
 MAC_ADDRESS_PATTERN = re.compile(r"\b(?:[0-9A-Fa-f]{2}[:-]){5}(?:[0-9A-Fa-f]{2})\b")
 IMEI_PATTERN = re.compile(r"\b\d{15}\b")
 ACCOUNT_NUMBER_PATTERN = re.compile(r"\b(?:A/?C|ACC(?:OUNT)?|IBAN)?\s*[:#-]?\s*(\d{9,18})\b", re.IGNORECASE)
+CRYPTO_WALLET_PATTERN = re.compile(r"\b(0x[a-fA-F0-9]{40}|[13][a-km-zA-HJ-NP-Z1-9]{25,34}|bc1[a-z0-9]{39,59})\b")
 
 STOPWORDS_NAME = {
     "BEGIN", "VCARD", "VERSION", "HTTP", "HTTPS", "TRUE", "FALSE", "NULL",
@@ -239,7 +240,18 @@ def extract_identifiers_from_text(text: str, record_idx: int) -> List[Dict[str, 
                 "status": "EXTRACTED"
             })
 
-    # 7. Name heuristic (Checks full text and individual lines for formatted names)
+    # 7. Crypto Wallet extraction (BTC, ETH, etc.)
+    for match in CRYPTO_WALLET_PATTERN.finditer(text):
+        identifiers.append({
+            "field": "crypto_wallet",
+            "value": match.group(0),
+            "source_record_index": record_idx,
+            "extraction_method": "crypto_wallet_regex",
+            "confidence": 0.95,
+            "status": "EXTRACTED"
+        })
+
+    # 8. Name heuristic (Checks full text and individual lines for formatted names)
     clean_text = text.strip()
     candidates_to_check = [clean_text]
     for line in text.splitlines():
@@ -320,6 +332,31 @@ def parse_nfc_raw_records(records: List[Dict[str, Any]]) -> Dict[str, Any]:
                     "confidence": 0.97,
                     "status": "EXTRACTED"
                 })
+
+                # Also extract direct tel: and mailto: URI records into canonical phone and email identifiers
+                lowered_url = data_text.strip().lower()
+                if lowered_url.startswith("tel:"):
+                    norm_phone = normalize_phone_number(data_text.strip()[4:].split("?")[0])
+                    if norm_phone:
+                        extracted_identifiers.append({
+                            "field": "phone",
+                            "value": norm_phone,
+                            "source_record_index": idx,
+                            "extraction_method": "nfc_url_tel",
+                            "confidence": 0.98,
+                            "status": "EXTRACTED"
+                        })
+                elif lowered_url.startswith("mailto:"):
+                    clean_em = data_text.strip()[7:].split("?")[0].strip().lower()
+                    if clean_em and "@" in clean_em:
+                        extracted_identifiers.append({
+                            "field": "email",
+                            "value": clean_em,
+                            "source_record_index": idx,
+                            "extraction_method": "nfc_url_mailto",
+                            "confidence": 0.98,
+                            "status": "EXTRACTED"
+                        })
         elif rec_type in ("text", "mime") or data_text:
             if len(data_text) > MAX_TEXT_FIELD_LENGTH:
                 data_text = data_text[:MAX_TEXT_FIELD_LENGTH]

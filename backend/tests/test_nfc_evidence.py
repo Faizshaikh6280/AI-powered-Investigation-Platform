@@ -21,8 +21,10 @@ import os
 import sys
 import json
 import uuid
-import datetime
-import pytest
+try:
+    import pytest
+except ImportError:
+    pytest = None
 
 # Ensure backend app is in path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -86,9 +88,10 @@ def setup_test_env():
         db.add(profile)
         db.commit()
 
-@pytest.fixture(scope="module", autouse=True)
-def _pytest_setup():
-    setup_test_env()
+if pytest:
+    @pytest.fixture(scope="module", autouse=True)
+    def _pytest_setup():
+        setup_test_env()
 
 def get_auth_client(role_name: str, employee_id: str, case_id: str = "CASE-NFC-TEST-001") -> TestClient:
     """Helper creating an authenticated TestClient with specific role and case membership."""

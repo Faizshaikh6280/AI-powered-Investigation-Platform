@@ -78,7 +78,7 @@ export const GeoPlaybackControls: React.FC<GeoPlaybackControlsProps> = ({
   const progressPercent = maxTime > minTime ? ((currentTime - minTime) / (maxTime - minTime)) * 100 : 0;
 
   return (
-    <div className="bg-[#0b101b]/95 border border-border/80 rounded-xl p-3 backdrop-blur-lg shadow-2xl flex flex-col gap-2.5 max-w-2xl w-full">
+    <div className="bg-card/95 border border-border/80 rounded-xl p-3 backdrop-blur-lg shadow-2xl flex flex-col gap-2.5 max-w-2xl w-full">
       {/* Top row: Status & Scrubber */}
       <div className="flex items-center justify-between text-xs">
         <div className="flex items-center gap-2">

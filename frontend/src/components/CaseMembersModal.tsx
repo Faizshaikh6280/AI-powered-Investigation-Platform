@@ -90,7 +90,7 @@ export default function CaseMembersModal({ isOpen, onClose, caseId, caseTitle }:
       <div className="relative w-full max-w-xl bg-card border border-border rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         <div className="h-1 bg-gradient-to-r from-primary via-cyan-500 to-indigo-500" />
 
-        <div className="p-6">
+        <div className="p-4 sm:p-6 max-h-[92vh] sm:max-h-[85vh] overflow-y-auto">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2.5">
               <div className="p-2 bg-primary/10 rounded-lg text-primary">

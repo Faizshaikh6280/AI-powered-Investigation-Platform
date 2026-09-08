@@ -60,13 +60,46 @@ def trigger_analysis(
     if sync:
         logger.info(f"Executing multi-engine anomaly analysis synchronously for case: {target_case_id}")
         result = run_anomaly_detection(case_id=target_case_id)
+        record_audit_event(
+            action=AuditAction.ANOMALY_INVESTIGATED,
+            result="SUCCESS",
+            user_id=current_user.id,
+            actor=current_user.official_email,
+            role=current_user.role.name if current_user.role else None,
+            case_id=target_case_id,
+            resource_type="anomaly_engine",
+            details={"sync": True, "detectors_run": len(detector_registry.get_all_detectors())},
+            db=db
+        )
         return {"message": "Analysis completed", "result": result}
     try:
         task = run_anomaly_detection.delay(case_id=target_case_id)
+        record_audit_event(
+            action=AuditAction.ANOMALY_INVESTIGATED,
+            result="SUCCESS",
+            user_id=current_user.id,
+            actor=current_user.official_email,
+            role=current_user.role.name if current_user.role else None,
+            case_id=target_case_id,
+            resource_type="anomaly_engine",
+            details={"sync": False, "task_id": str(task.id)},
+            db=db
+        )
         return {"message": "Analysis started", "task_id": task.id}
     except Exception as e:
         logger.warning(f"[Celery] Task queuing unavailable ({e}), executing synchronously...")
         result = run_anomaly_detection(case_id=target_case_id)
+        record_audit_event(
+            action=AuditAction.ANOMALY_INVESTIGATED,
+            result="SUCCESS",
+            user_id=current_user.id,
+            actor=current_user.official_email,
+            role=current_user.role.name if current_user.role else None,
+            case_id=target_case_id,
+            resource_type="anomaly_engine",
+            details={"fallback_sync": True},
+            db=db
+        )
         return {"message": "Analysis completed (direct mode)", "result": result}
 
 @router.get("/health")
@@ -508,7 +541,7 @@ def dismiss_finding(
     db.commit()
 
     record_audit_event(
-        action="FINDING_DISMISSED",
+        action=AuditAction.FINDING_DISMISSED,
         result="SUCCESS",
         user_id=current_user.id,
         actor=current_user.official_email,

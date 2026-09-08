@@ -44,19 +44,19 @@ export const GeoAreaInvestigationModal: React.FC<GeoAreaInvestigationModalProps>
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md p-4 animate-in fade-in duration-150">
-      <div className="bg-[#0b101b] border border-border/90 rounded-2xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md p-2 sm:p-4 animate-in fade-in duration-150">
+      <div className="bg-card border border-border/90 rounded-2xl w-full max-w-3xl max-h-[92vh] sm:max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
         {/* Header */}
-        <div className="p-4 border-b border-border/70 flex items-center justify-between">
+        <div className="p-3 sm:p-4 border-b border-border/70 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="p-2 rounded-lg bg-primary/20 text-primary border border-primary/40">
               <Crosshair className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-foreground">
+              <h2 className="text-sm sm:text-base font-bold text-foreground">
                 Geofence & Area Investigation ("Who Was Here?")
               </h2>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-[11px] sm:text-xs text-muted-foreground">
                 Reconstruct all digital identities, communications, and movements within a spatial radius.
               </p>
             </div>
@@ -70,7 +70,7 @@ export const GeoAreaInvestigationModal: React.FC<GeoAreaInvestigationModalProps>
         </div>
 
         {/* Input Bar */}
-        <div className="p-4 bg-secondary/30 border-b border-border/60 grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+        <div className="p-3 sm:p-4 bg-secondary/30 border-b border-border/60 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3 text-xs">
           <div>
             <label className="block text-[11px] text-muted-foreground font-semibold mb-1">
               Latitude
@@ -148,9 +148,9 @@ export const GeoAreaInvestigationModal: React.FC<GeoAreaInvestigationModalProps>
           {result && !loading && (
             <div className="space-y-4">
               {/* Summary Badges */}
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
                 <div className="p-3 rounded-xl bg-secondary/40 border border-border/60 flex items-center gap-3">
-                  <Users className="w-5 h-5 text-primary" />
+                  <Users className="w-5 h-5 text-primary flex-shrink-0" />
                   <div>
                     <span className="text-[10px] text-muted-foreground uppercase font-semibold block">
                       Entities Detected
@@ -162,7 +162,7 @@ export const GeoAreaInvestigationModal: React.FC<GeoAreaInvestigationModalProps>
                 </div>
 
                 <div className="p-3 rounded-xl bg-secondary/40 border border-border/60 flex items-center gap-3">
-                  <Activity className="w-5 h-5 text-emerald-400" />
+                  <Activity className="w-5 h-5 text-emerald-400 flex-shrink-0" />
                   <div>
                     <span className="text-[10px] text-muted-foreground uppercase font-semibold block">
                       Events in Radius
@@ -174,7 +174,7 @@ export const GeoAreaInvestigationModal: React.FC<GeoAreaInvestigationModalProps>
                 </div>
 
                 <div className="p-3 rounded-xl bg-secondary/40 border border-border/60 flex items-center gap-3">
-                  <MapPin className="w-5 h-5 text-amber-400" />
+                  <MapPin className="w-5 h-5 text-amber-400 flex-shrink-0" />
                   <div>
                     <span className="text-[10px] text-muted-foreground uppercase font-semibold block">
                       Search Envelope
@@ -193,8 +193,8 @@ export const GeoAreaInvestigationModal: React.FC<GeoAreaInvestigationModalProps>
                   <span>Subjects & Entities Present</span>
                 </h4>
 
-                <div className="border border-border/60 rounded-xl overflow-hidden">
-                  <table className="w-full text-left">
+                <div className="border border-border/60 rounded-xl overflow-x-auto touch-scroll">
+                  <table className="w-full text-left min-w-[560px]">
                     <thead className="bg-secondary/60 text-[10px] font-semibold uppercase text-muted-foreground border-b border-border/60">
                       <tr>
                         <th className="p-2.5">Subject / Entity</th>

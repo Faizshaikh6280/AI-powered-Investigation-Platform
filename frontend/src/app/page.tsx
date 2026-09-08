@@ -11,7 +11,7 @@ import {
 import { useTheme } from 'next-themes';
 import { cn } from '../utils/cn';
 import { CaseProvider, useCase } from '../context/CaseContext';
-import { AuthProvider, useAuth, SEEDED_DEV_ACCOUNTS } from '../context/AuthContext';
+import { AuthProvider, useAuth } from '../context/AuthContext';
 
 // Modules
 import OverviewDashboard from '../components/OverviewDashboard';
@@ -66,13 +66,13 @@ function InvestigationWorkspace() {
     isAuthenticated, 
     can, 
     logout, 
-    switchDevRole, 
     setIsProfileModalOpen, 
     setIsLoginModalOpen 
   } = useAuth();
 
   const [activeTab, setActiveTab] = useState('overview');
   const [isSidebarExpanded, setSidebarExpanded] = useState(false);
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
   
@@ -102,13 +102,19 @@ function InvestigationWorkspace() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Handle case_id redirect from NFC authentication
+  // Handle case_id and tab redirect from URL params
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const targetCase = params.get('case_id') || params.get('case');
       if (targetCase) {
         setActiveCaseId(targetCase);
+      }
+      const targetTab = params.get('tab');
+      if (targetTab) {
+        setActiveTab(targetTab);
+      }
+      if (targetCase) {
         window.history.replaceState({}, document.title, window.location.pathname);
       }
     }
@@ -140,12 +146,78 @@ function InvestigationWorkspace() {
   const visibleNavItems = navigation.filter(item => !item.permission || can(item.permission));
 
   return (
-    <div className="flex h-screen w-full bg-background text-foreground overflow-hidden relative">
+    <div className="flex h-[100dvh] w-full bg-background text-foreground overflow-hidden relative">
       
-      {/* Sidebar */}
+      {/* Mobile Drawer Backdrop */}
+      {isMobileNavOpen && (
+        <div 
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden animate-in fade-in duration-200"
+          onClick={() => setIsMobileNavOpen(false)}
+        />
+      )}
+
+      {/* Mobile Navigation Drawer */}
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] bg-card/95 backdrop-blur-2xl border-r border-border shadow-2xl flex flex-col transition-transform duration-300 ease-in-out md:hidden",
+          isMobileNavOpen ? "translate-x-0" : "-translate-x-full"
+        )}
+      >
+        <div className="h-14 flex items-center justify-between px-4 border-b border-border">
+          <div className="flex items-center gap-2 text-primary font-bold text-lg tracking-tight">
+            <ShieldCheck className="w-6 h-6 text-primary" />
+            <span className="text-foreground">TRACE</span>
+            <span className="text-[10px] font-bold bg-primary/10 text-primary px-1.5 py-0.5 rounded-full border border-primary/20">V2</span>
+          </div>
+          <button 
+            onClick={() => setIsMobileNavOpen(false)}
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+            title="Close menu"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto py-3 px-3 space-y-1">
+          {visibleNavItems.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => {
+                setActiveTab(item.id);
+                setIsMobileNavOpen(false);
+              }}
+              className={cn(
+                "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors",
+                activeTab === item.id 
+                  ? "bg-primary text-primary-foreground shadow-sm" 
+                  : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+              )}
+            >
+              <item.icon className={cn("w-5 h-5 flex-shrink-0", activeTab === item.id ? "text-primary-foreground" : "text-muted-foreground")} />
+              <span className="truncate">{item.label}</span>
+            </button>
+          ))}
+        </div>
+
+        {isAuthenticated && user && (
+          <div className="p-3 border-t border-border bg-secondary/30">
+            <div className="flex items-center gap-2.5 p-2 rounded-xl bg-secondary/50 border border-border">
+              <div className="w-8 h-8 rounded-full bg-primary/10 border border-primary/30 flex items-center justify-center text-primary shrink-0">
+                <User className="w-4 h-4" />
+              </div>
+              <div className="flex flex-col min-w-0 flex-1">
+                <span className="text-xs font-bold text-foreground truncate">{user.full_name}</span>
+                <span className="text-[10px] text-muted-foreground font-mono truncate">{user.role_display || user.role}</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </aside>
+
+      {/* Desktop Collapsible Sidebar */}
       <aside 
         className={cn(
-          "flex-shrink-0 flex flex-col border-r border-border bg-panel backdrop-blur-xl z-30 transition-all duration-300 ease-in-out",
+          "hidden md:flex flex-shrink-0 flex-col border-r border-border bg-panel backdrop-blur-xl z-30 transition-all duration-300 ease-in-out",
           isSidebarExpanded ? "w-64" : "w-16"
         )}
         onMouseEnter={() => setSidebarExpanded(true)}
@@ -186,55 +258,65 @@ function InvestigationWorkspace() {
       <div className="flex-1 flex flex-col min-w-0 relative bg-background">
         
         {/* Top Header */}
-        <header className="h-14 flex-shrink-0 flex items-center justify-between px-4 border-b border-border bg-background z-20">
-          {/* Modern Glassmorphic Active Case Switcher */}
-          <div className="relative" ref={caseDropdownRef}>
+        <header className="h-14 flex-shrink-0 flex items-center justify-between px-2 sm:px-4 border-b border-border bg-background z-20">
+          {/* Mobile Hamburger Toggle & Active Case Switcher */}
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
             <button
-              onClick={() => setIsCaseDropdownOpen(!isCaseDropdownOpen)}
-              className="flex items-center gap-2.5 bg-secondary/80 hover:bg-secondary border border-border px-3 py-1.5 rounded-xl transition-all shadow-sm text-left group"
-              title="Click to switch investigation case"
+              onClick={() => setIsMobileNavOpen(true)}
+              className="md:hidden p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary focus:outline-none"
+              title="Open navigation menu"
             >
-              <div className="p-1 rounded-lg bg-primary/10 text-primary">
-                <FolderOpen className="w-4 h-4 flex-shrink-0" />
-              </div>
-              <div className="flex flex-col">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-bold text-foreground max-w-[180px] sm:max-w-[240px] truncate">
-                    {activeCase ? activeCase.title : "Select Case Dossier"}
-                  </span>
-                  {activeCase?.status && (
-                    <span className="text-[9px] font-bold text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
-                      {activeCase.status}
+              <Menu className="w-5 h-5" />
+            </button>
+
+            {/* Modern Glassmorphic Active Case Switcher */}
+            <div className="relative min-w-0" ref={caseDropdownRef}>
+              <button
+                onClick={() => setIsCaseDropdownOpen(!isCaseDropdownOpen)}
+                className="flex items-center gap-1.5 sm:gap-2.5 bg-secondary/80 hover:bg-secondary border border-border px-2 sm:px-3 py-1.5 rounded-xl transition-all shadow-sm text-left group max-w-[210px] xs:max-w-[260px] sm:max-w-none"
+                title="Click to switch investigation case"
+              >
+                <div className="p-1 rounded-lg bg-primary/10 text-primary shrink-0">
+                  <FolderOpen className="w-4 h-4 flex-shrink-0" />
+                </div>
+                <div className="flex flex-col min-w-0">
+                  <div className="flex items-center gap-1 min-w-0">
+                    <span className="text-xs font-bold text-foreground max-w-[90px] xs:max-w-[130px] sm:max-w-[240px] truncate">
+                      {activeCase ? activeCase.title : "Select Case Dossier"}
+                    </span>
+                    {activeCase?.status && (
+                      <span className="hidden xs:inline-block text-[9px] font-bold text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 shrink-0">
+                        {activeCase.status}
+                      </span>
+                    )}
+                  </div>
+                  {activeCase && (
+                    <span className="text-[10px] text-muted-foreground font-medium truncate hidden sm:block">
+                      {activeCase.case_reference}
                     </span>
                   )}
                 </div>
-                {activeCase && (
-                  <span className="text-[10px] text-muted-foreground font-medium">
-                    {activeCase.case_reference}
-                  </span>
-                )}
-              </div>
-              <ChevronDown className={cn("w-3.5 h-3.5 text-muted-foreground ml-1 transition-transform duration-200", isCaseDropdownOpen && "rotate-180")} />
-            </button>
+                <ChevronDown className={cn("w-3.5 h-3.5 text-muted-foreground ml-0.5 sm:ml-1 shrink-0 transition-transform duration-200", isCaseDropdownOpen && "rotate-180")} />
+              </button>
 
-            {isCaseDropdownOpen && (
-              <div className="absolute left-0 top-full mt-2 w-80 bg-card/95 backdrop-blur-xl border border-border rounded-2xl shadow-2xl z-50 p-2 animate-in fade-in zoom-in-95 duration-150">
-                <div className="px-2 py-1.5 border-b border-border/80 mb-2 flex items-center gap-2">
-                  <Search className="w-3.5 h-3.5 text-muted-foreground" />
-                  <input
-                    type="text"
-                    placeholder="Filter cases..."
-                    value={caseSearchQuery}
-                    onChange={(e) => setCaseSearchQuery(e.target.value)}
-                    className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none"
-                    autoFocus
-                  />
-                  {caseSearchQuery && (
-                    <button onClick={() => setCaseSearchQuery('')} className="text-muted-foreground hover:text-foreground">
-                      <X className="w-3 h-3" />
-                    </button>
-                  )}
-                </div>
+              {isCaseDropdownOpen && (
+                <div className="fixed sm:absolute left-2 sm:left-0 right-2 sm:right-auto top-16 sm:top-full mt-1 w-[calc(100vw-1rem)] sm:w-80 max-w-sm bg-card/95 backdrop-blur-xl border border-border rounded-2xl shadow-2xl z-50 p-2 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="px-2 py-1.5 border-b border-border/80 mb-2 flex items-center gap-2">
+                    <Search className="w-3.5 h-3.5 text-muted-foreground" />
+                    <input
+                      type="text"
+                      placeholder="Filter cases..."
+                      value={caseSearchQuery}
+                      onChange={(e) => setCaseSearchQuery(e.target.value)}
+                      className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none"
+                      autoFocus
+                    />
+                    {caseSearchQuery && (
+                      <button onClick={() => setCaseSearchQuery('')} className="text-muted-foreground hover:text-foreground">
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
 
                 <div className="max-h-60 overflow-y-auto space-y-1">
                   {cases.filter(c => 
@@ -295,16 +377,17 @@ function InvestigationWorkspace() {
               </div>
             )}
           </div>
+        </div>
 
           {/* Quick Search */}
-          <div className="flex-1 max-w-xl px-4 hidden md:block">
+          <div className="flex-1 max-w-md px-4 hidden lg:block">
             <button 
               onClick={() => setCmdOpen(true)}
-              className="flex items-center w-full px-3 py-1.5 bg-secondary text-muted-foreground border border-border rounded-md hover:bg-secondary/80 transition-colors text-sm"
+              className="flex items-center w-full px-3 py-1.5 bg-secondary text-muted-foreground border border-border rounded-md hover:bg-secondary/80 transition-colors text-xs"
             >
-              <Search className="h-4 w-4 mr-2" />
-              <span>Search entities, phones, accounts, IPs...</span>
-              <kbd className="ml-auto flex items-center gap-1 font-mono text-[10px] bg-background border border-border rounded px-1.5 py-0.5">
+              <Search className="h-3.5 w-3.5 mr-2 flex-shrink-0" />
+              <span className="truncate whitespace-nowrap">Search entities, phones, accounts, IPs...</span>
+              <kbd className="ml-auto flex items-center gap-1 font-mono text-[10px] bg-background border border-border rounded px-1.5 py-0.5 flex-shrink-0">
                 <Command className="w-3 h-3" /> K
               </kbd>
             </button>
@@ -312,22 +395,20 @@ function InvestigationWorkspace() {
 
           {/* Right Header Controls & IAM Profile Badge */}
           <div className="flex items-center gap-2">
-            {/* Dev Quick Role Switcher */}
-            <div className="hidden lg:flex items-center gap-1.5 bg-secondary/70 border border-border px-2 py-1 rounded-lg">
-              <Shield className="w-3.5 h-3.5 text-primary" />
-              <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Role:</span>
-              <select
-                value={role || ''}
-                onChange={(e) => switchDevRole(e.target.value)}
-                className="bg-transparent text-xs font-semibold text-foreground border-none outline-none cursor-pointer pr-1"
-                title="Law Enforcement Role Switcher (RBAC Test Bed)"
-              >
-                {Object.entries(SEEDED_DEV_ACCOUNTS).map(([key, acc]) => (
-                  <option key={key} value={key} className="bg-card text-foreground">
-                    {acc.display_name} ({acc.badge})
-                  </option>
-                ))}
-              </select>
+            {/* Authenticated Officer RBAC Role Badge (Strict RBAC - Read-Only) */}
+            <div className="hidden lg:flex items-center gap-2 bg-secondary/80 border border-border px-3 py-1.5 rounded-lg shadow-sm">
+              <Shield className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+              <div className="flex items-center gap-1.5 text-xs font-mono">
+                <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">ROLE:</span>
+                <span className="font-semibold text-foreground">
+                  {user?.role_display || user?.role || 'INVESTIGATOR'}
+                </span>
+                {user?.employee_id && (
+                  <span className="text-muted-foreground text-[11px]">
+                    ({user.employee_id})
+                  </span>
+                )}
+              </div>
             </div>
 
             {/* Anomalies Bell */}
@@ -404,7 +485,10 @@ function InvestigationWorkspace() {
         </header>
 
         {/* Dynamic Canvas */}
-        <main className="flex-1 overflow-auto relative">
+        <main className={cn(
+          "flex-1 relative min-w-0",
+          activeTab === 'geospatial' ? "overflow-hidden h-[calc(100vh-3.5rem)] flex flex-col" : "overflow-auto"
+        )}>
           {activeTab === 'overview' && (
             <OverviewDashboard onNavigateTab={(tab) => setActiveTab(tab)} />
           )}
@@ -443,13 +527,6 @@ function InvestigationWorkspace() {
           {activeTab === 'relationship-graph' && (
             <GraphTopologyViewer 
               focusEntityId={focusAnomalyEntityId} 
-              focusEntityIds={focusEntityIds}
-              focusCommunityId={focusCommunityId}
-              onClearFocus={() => {
-                setFocusAnomalyEntityId(null);
-                setFocusEntityIds(null);
-                setFocusCommunityId(null);
-              }}
             />
           )}
 
@@ -499,12 +576,6 @@ function InvestigationWorkspace() {
           {activeTab === 'agentic' && (
             <InvestigationDashboard 
               activeCaseId={activeCase?.case_id || ""} 
-              onNavigateToGraph={(entityIds, communityId) => {
-                setFocusEntityIds(entityIds || null);
-                setFocusCommunityId(communityId !== undefined ? communityId : null);
-                setFocusAnomalyEntityId(null);
-                setActiveTab('relationship-graph');
-              }}
             />
           )}
         </main>
@@ -541,7 +612,7 @@ function InvestigationWorkspace() {
 
       {/* Command Palette Modal */}
       {cmdOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center pt-32 bg-black/40 backdrop-blur-sm" onClick={() => setCmdOpen(false)}>
+        <div className="fixed inset-0 z-50 flex items-start justify-center pt-16 sm:pt-28 px-3 sm:px-4 bg-black/40 backdrop-blur-sm" onClick={() => setCmdOpen(false)}>
           <div className="w-full max-w-2xl bg-card border border-border rounded-xl shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center px-4 py-3 border-b border-border">
               <Search className="w-5 h-5 text-muted-foreground mr-3" />

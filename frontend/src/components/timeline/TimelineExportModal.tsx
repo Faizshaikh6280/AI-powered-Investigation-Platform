@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Download, FileText, X, ShieldCheck, Check } from 'lucide-react';
+import { Download, FileText, X, ShieldCheck, Check, Database, FileSpreadsheet } from 'lucide-react';
 import { useTimelineStore } from '../../store/useTimelineStore';
 import { cn } from '../../utils/cn';
 
@@ -24,7 +24,7 @@ export const TimelineExportModal: React.FC<ExportModalProps> = ({
     const targetCaseId = caseId || '';
     const endpoint = `/api/timeline/export?format=${format}${targetCaseId ? `&case_id=${encodeURIComponent(targetCaseId)}` : ''}`;
     
-    // Trigger download
+    // Trigger browser download directly from real backend export endpoint
     window.location.href = endpoint;
     setTimeout(() => {
       setIsExporting(false);
@@ -37,29 +37,32 @@ export const TimelineExportModal: React.FC<ExportModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
-      <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md p-6 space-y-5">
+    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150 select-none">
+      <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md p-4 sm:p-6 space-y-4 sm:space-y-5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Download className="w-5 h-5 text-primary" />
-            <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">Court-Ready Dossier Export</h3>
+            <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">
+              Court-Ready Dossier Export
+            </h3>
           </div>
           <button
             onClick={() => setIsExportModalOpen(false)}
             className="p-1 text-muted-foreground hover:text-foreground rounded-lg hover:bg-secondary transition-colors"
+            aria-label="Close"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         <p className="text-xs text-muted-foreground leading-relaxed">
-          Generates an evidence-backed export containing raw and normalized timestamps, entity linkages, cryptographic SHA-256 evidence checksums, and anomaly flags for legal chain-of-custody compliance.
+          Generates a verified, evidence-backed export containing normalized UTC timestamps, entity linkages, cryptographic SHA-256 evidence hashes, and anomaly flags for legal chain-of-custody compliance.
         </p>
 
         {/* Format Selector */}
         <div className="space-y-2">
-          <label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Select Format</label>
-          <div className="grid grid-cols-2 gap-3">
+          <label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Select Forensic Format</label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
             <button
               onClick={() => setFormat('json')}
               className={cn(
@@ -69,7 +72,10 @@ export const TimelineExportModal: React.FC<ExportModalProps> = ({
                   : "bg-secondary/40 border-border text-foreground hover:bg-secondary/80"
               )}
             >
-              <span>Structured JSON</span>
+              <div className="flex items-center gap-2">
+                <Database className="w-4 h-4" />
+                <span>Structured JSON</span>
+              </div>
               {format === 'json' && <Check className="w-4 h-4" />}
             </button>
 
@@ -82,25 +88,28 @@ export const TimelineExportModal: React.FC<ExportModalProps> = ({
                   : "bg-secondary/40 border-border text-foreground hover:bg-secondary/80"
               )}
             >
-              <span>Forensic CSV Table</span>
+              <div className="flex items-center gap-2">
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>Forensic CSV Table</span>
+              </div>
               {format === 'csv' && <Check className="w-4 h-4" />}
             </button>
           </div>
         </div>
 
-        {/* Summary Info Box */}
-        <div className="bg-secondary/50 border border-border rounded-lg p-3 text-xs space-y-1">
+        {/* Summary Lineage Info Box */}
+        <div className="bg-secondary/50 border border-border rounded-lg p-3 text-xs space-y-1.5">
           <div className="flex justify-between">
-            <span className="text-muted-foreground">Case Scope:</span>
+            <span className="text-muted-foreground">Investigation Scope:</span>
             <span className="font-mono font-bold text-foreground">{caseId || 'Active Case'}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-muted-foreground">Total Export Records:</span>
+            <span className="text-muted-foreground">Total Exported Records:</span>
             <span className="font-mono font-bold text-foreground">{totalEvents} events</span>
           </div>
-          <div className="flex items-center gap-1.5 text-emerald-400 font-semibold pt-1 border-t border-border/40 text-[11px]">
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span>Cryptographic SHA-256 checksums verified</span>
+          <div className="flex items-center gap-1.5 text-emerald-400 font-semibold pt-1.5 border-t border-border/40 text-[11px]">
+            <ShieldCheck className="w-4 h-4 flex-shrink-0" />
+            <span>Cryptographic SHA-256 lineage seals applied</span>
           </div>
         </div>
 
@@ -115,12 +124,12 @@ export const TimelineExportModal: React.FC<ExportModalProps> = ({
           <button
             onClick={handleDownload}
             disabled={isExporting || downloadSuccess}
-            className="flex items-center gap-2 px-5 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold rounded-md shadow-sm transition-colors"
+            className="flex items-center gap-2 px-5 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold rounded-md shadow-sm transition-colors disabled:opacity-50"
           >
             {downloadSuccess ? (
               <>
                 <Check className="w-4 h-4" />
-                <span>Downloaded</span>
+                <span>Dossier Dispatched</span>
               </>
             ) : isExporting ? (
               <span>Exporting...</span>
@@ -136,3 +145,4 @@ export const TimelineExportModal: React.FC<ExportModalProps> = ({
     </div>
   );
 };
+export default TimelineExportModal;

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 export type TimelineMode = 'subject' | 'network' | 'cross_domain' | 'map_sync' | 'storyline';
 export type TimelineZoom = 'month' | 'day' | 'hour' | 'minute';
+export type TimelineContextTab = 'event' | 'map' | 'intelligence';
 
 export interface TimelineState {
   // Mode & Zoom
@@ -13,8 +14,10 @@ export interface TimelineState {
   // Selection
   selectedEventId: string | null;
   hoveredEventId: string | null;
+  selectedCorrelationId: string | null;
   setSelectedEventId: (id: string | null) => void;
   setHoveredEventId: (id: string | null) => void;
+  setSelectedCorrelationId: (id: string | null) => void;
 
   // Filter State
   selectedEntityIds: string[];
@@ -49,7 +52,12 @@ export interface TimelineState {
   stepForward: (stepMs?: number) => void;
   stepBackward: (stepMs?: number) => void;
 
-  // Modal & Drawer State
+  // Context Workstation Panel & Modals
+  activeContextTab: TimelineContextTab;
+  setActiveContextTab: (tab: TimelineContextTab) => void;
+  isRightPanelOpen: boolean;
+  setIsRightPanelOpen: (open: boolean) => void;
+
   contextEventId: string | null;
   contextWindowMinutes: number;
   isContextModalOpen: boolean;
@@ -61,20 +69,26 @@ export interface TimelineState {
   setIsFilterOpen: (open: boolean) => void;
 }
 
-const DEFAULT_DOMAINS = ['TELECOM', 'FINANCIAL', 'SOCIAL', 'LOCATION', 'NETWORK', 'ANALYTICAL'];
+const DEFAULT_DOMAINS = ['TELECOM', 'FINANCIAL', 'SOCIAL', 'LOCATION', 'NETWORK', 'GENERAL', 'KYC', 'ANALYTICAL'];
 
 export const useTimelineStore = create<TimelineState>((set, get) => ({
   // Mode & Zoom
   activeMode: 'cross_domain',
-  zoomLevel: 'minute',
+  zoomLevel: 'month',
   setActiveMode: (mode) => set({ activeMode: mode }),
   setZoomLevel: (zoom) => set({ zoomLevel: zoom }),
 
   // Selection
   selectedEventId: null,
   hoveredEventId: null,
-  setSelectedEventId: (id) => set({ selectedEventId: id }),
+  selectedCorrelationId: null,
+  setSelectedEventId: (id) => set({ 
+    selectedEventId: id,
+    // Automatically open right panel when an event is selected
+    ...(id ? { isRightPanelOpen: true, activeContextTab: 'event' } : {})
+  }),
   setHoveredEventId: (id) => set({ hoveredEventId: id }),
+  setSelectedCorrelationId: (id) => set({ selectedCorrelationId: id }),
 
   // Filters
   selectedEntityIds: [],
@@ -153,7 +167,12 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     set({ currentTime: next });
   },
 
-  // Modals & Drawers
+  // Context Workstation Panel & Modals
+  activeContextTab: 'event',
+  setActiveContextTab: (tab) => set({ activeContextTab: tab }),
+  isRightPanelOpen: true,
+  setIsRightPanelOpen: (open) => set({ isRightPanelOpen: open }),
+
   contextEventId: null,
   contextWindowMinutes: 15,
   isContextModalOpen: false,

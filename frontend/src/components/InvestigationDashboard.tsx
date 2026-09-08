@@ -49,7 +49,11 @@ export function InvestigationDashboard({ activeCaseId }: Props) {
       body: JSON.stringify({ case_id: activeCaseId })
     })
       .then(res => {
-        setCommunities(res.communities || []);
+        const comms = res.communities || [];
+        setCommunities(comms);
+        if (comms.length > 0) {
+          setSelectedCommunity(prev => prev || 'all');
+        }
         setGdsStatus('done');
       })
       .catch(err => {
@@ -83,12 +87,9 @@ export function InvestigationDashboard({ activeCaseId }: Props) {
     setCompletedStages([]);
     setCurrentThought('Initializing multi-agent pipeline and graph context...');
 
-    // Use direct port 8000 URL on local environments to bypass any proxy chunk buffering
-    const isLocal = typeof window !== 'undefined' && 
-      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.') || window.location.hostname.startsWith('10.'));
-    const apiBase = isLocal 
-      ? `http://${window.location.hostname}:8000` 
-      : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000');
+    const apiBase = typeof window !== 'undefined'
+      ? ''
+      : (process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000');
 
     const sseUrl = selectedCommunity === 'all'
       ? `${apiBase}/api/v1/investigation/entire-graph/synthesize?case_id=${encodeURIComponent(activeCaseId || '')}`
@@ -212,27 +213,27 @@ export function InvestigationDashboard({ activeCaseId }: Props) {
 
   return (
     <div className="h-full w-full bg-slate-50 dark:bg-[#060b18] text-slate-800 dark:text-slate-200 overflow-y-auto">
-      <div className="max-w-6xl mx-auto p-6 space-y-6">
+      <div className="max-w-6xl mx-auto p-3 sm:p-6 space-y-4 sm:space-y-6">
 
         {/* ═══ HEADER ═══ */}
-        <div className="bg-white/70 dark:bg-slate-900/60 backdrop-blur-xl border border-slate-200/50 dark:border-slate-700/40 rounded-2xl shadow-lg p-6">
-          <div className="flex items-center gap-4">
-            <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20">
-              <ShieldAlert className="w-7 h-7 text-indigo-500" />
+        <div className="bg-white/70 dark:bg-slate-900/60 backdrop-blur-xl border border-slate-200/50 dark:border-slate-700/40 rounded-2xl shadow-lg p-4 sm:p-6">
+          <div className="flex items-center gap-3 sm:gap-4">
+            <div className="p-2.5 sm:p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 shrink-0">
+              <ShieldAlert className="w-6 h-6 sm:w-7 sm:h-7 text-indigo-500" />
             </div>
             <div>
-              <h1 className="text-2xl font-black tracking-wider text-slate-900 dark:text-white uppercase">Agentic Forensics</h1>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">Multi-agent AI investigation pipeline &bull; Graph intelligence &bull; Cross-domain analysis</p>
+              <h1 className="text-xl sm:text-2xl font-black tracking-wider text-slate-900 dark:text-white uppercase">Agentic Forensics</h1>
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">Multi-agent AI investigation pipeline &bull; Graph intelligence &bull; Cross-domain analysis</p>
             </div>
           </div>
         </div>
 
         {/* ═══ AI AGENT TASK FORCE ═══ */}
-        <div className="bg-white/70 dark:bg-slate-900/60 backdrop-blur-xl border border-slate-200/50 dark:border-slate-700/40 rounded-2xl shadow-lg p-6">
+        <div className="bg-white/70 dark:bg-slate-900/60 backdrop-blur-xl border border-slate-200/50 dark:border-slate-700/40 rounded-2xl shadow-lg p-4 sm:p-6">
           <h2 className="text-sm font-black uppercase tracking-widest text-slate-600 dark:text-slate-300 mb-4 flex items-center gap-2">
             <Users className="w-5 h-5 text-indigo-500" /> AI Agent Task Force
           </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
             {[
               { id: "financial", name: "Financial Intelligence", icon: <Banknote className="w-5 h-5 text-emerald-500" />, duty: "Money flows, mule networks, laundering patterns", color: "border-emerald-500/30 bg-emerald-500/5", activeColor: "ring-2 ring-emerald-500 bg-emerald-500/10 shadow-lg shadow-emerald-500/20" },
               { id: "spatial", name: "Geographic Intelligence", icon: <MapPin className="w-5 h-5 text-purple-500" />, duty: "IP tracking, cell towers, movement analysis", color: "border-purple-500/30 bg-purple-500/5", activeColor: "ring-2 ring-purple-500 bg-purple-500/10 shadow-lg shadow-purple-500/20" },
@@ -292,7 +293,9 @@ export function InvestigationDashboard({ activeCaseId }: Props) {
                     body: JSON.stringify({ case_id: activeCaseId })
                   })
                     .then(res => {
-                      setCommunities(res.communities || []);
+                      const comms = res.communities || [];
+                      setCommunities(comms);
+                      if (comms.length > 0) setSelectedCommunity(prev => prev || 'all');
                       setGdsStatus('done');
                     })
                     .catch(() => setGdsStatus('error'));
@@ -326,7 +329,7 @@ export function InvestigationDashboard({ activeCaseId }: Props) {
                 <button 
                   onClick={runSynthesis}
                   disabled={!selectedCommunity || dossierState.status === 'running' || gdsStatus !== 'done'}
-                  className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-40 text-white font-bold py-3 px-6 rounded-xl flex items-center gap-2 shadow-lg transition-all shrink-0"
+                  className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-40 text-white font-bold py-3 px-6 rounded-xl flex items-center justify-center gap-2 shadow-lg transition-all shrink-0 w-full sm:w-auto cursor-pointer"
                 >
                   {dossierState.status === 'running' ? <Activity className="w-5 h-5 animate-spin" /> : <Cpu className="w-5 h-5" />}
                   {selectedCommunity === 'all' ? 'Execute Entire Graph Pipeline' : 'Execute AI Pipeline'}
@@ -527,7 +530,7 @@ export function InvestigationDashboard({ activeCaseId }: Props) {
                     <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wider shrink-0 font-mono", badgeClass)}>
                       {agentLabel}
                     </span>
-                    <span className="text-slate-200 font-mono text-[11px] break-words">
+                    <span className="text-slate-200 font-mono text-[11px] break-all sm:break-words min-w-0 flex-1">
                       {item.log}
                     </span>
                   </div>
@@ -563,11 +566,11 @@ export function InvestigationDashboard({ activeCaseId }: Props) {
 
             <div className="flex items-center gap-3 border-b border-slate-300 dark:border-slate-700 pb-4">
               <FileText className="w-7 h-7 text-indigo-500" />
-              <h1 className="text-2xl font-black uppercase tracking-tight text-slate-900 dark:text-white">Final Investigation Report</h1>
+              <h1 className="text-xl sm:text-2xl font-black uppercase tracking-tight text-slate-900 dark:text-white">Final Investigation Report</h1>
             </div>
 
             {isDossierError ? (
-              <div className="bg-red-500/5 border border-red-500/30 rounded-2xl p-6">
+              <div className="bg-red-500/5 border border-red-500/30 rounded-2xl p-4 sm:p-6">
                 <h2 className="text-red-500 font-bold mb-3 flex items-center gap-2"><AlertTriangle className="w-5 h-5" /> Agent Format Error</h2>
                 <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">{d.error}</p>
                 <div className="bg-slate-900 rounded-xl p-4 text-xs font-mono text-slate-300 overflow-auto whitespace-pre-wrap max-h-96">
@@ -577,15 +580,15 @@ export function InvestigationDashboard({ activeCaseId }: Props) {
             ) : (
               <>
                 {/* ── 1. Investigation Assessment ── */}
-                <div className="bg-white/80 dark:bg-slate-900/70 rounded-2xl shadow-lg p-6 border-l-4 border-l-indigo-500 border border-slate-200/50 dark:border-slate-700/40">
+                <div className="bg-white/80 dark:bg-slate-900/70 rounded-2xl shadow-lg p-4 sm:p-6 border-l-4 border-l-indigo-500 border border-slate-200/50 dark:border-slate-700/40">
                   <h2 className="text-base font-black uppercase tracking-widest text-slate-800 dark:text-slate-100 mb-3 flex items-center gap-2">
                     <Crosshair className="w-5 h-5 text-indigo-500" /> Investigation Assessment
                   </h2>
-                  <p className="text-slate-700 dark:text-slate-300 leading-relaxed text-[15px] mb-4">
+                  <p className="text-slate-700 dark:text-slate-300 leading-relaxed text-[14px] sm:text-[15px] mb-4">
                     {d.investigation_summary || "No assessment provided."}
                   </p>
                   {d.executive_assessment && (
-                    <div className="bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-900/30 p-4 rounded-xl">
+                    <div className="bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-900/30 p-3 sm:p-4 rounded-xl">
                       <h3 className="text-xs font-black uppercase text-indigo-500 mb-1">Executive Assessment</h3>
                       <p className="text-sm text-slate-700 dark:text-slate-300 font-medium">{d.executive_assessment}</p>
                     </div>
@@ -593,7 +596,7 @@ export function InvestigationDashboard({ activeCaseId }: Props) {
                 </div>
 
                 {/* ═══ DOSSIER NAVIGATION TABS ═══ */}
-                <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-3 overflow-x-auto">
+                <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-3 overflow-x-auto scrollbar-hide touch-scroll">
                   <button
                     onClick={() => setActiveDossierTab('master')}
                     className={cn(

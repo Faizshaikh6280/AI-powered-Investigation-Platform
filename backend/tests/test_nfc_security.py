@@ -44,10 +44,15 @@ from app.core.seed_nfc import SEEDED_DEV_NFC_CARDS
 from app.auth.rate_limiter import _ip_attempts
 from app.auth.password import hash_password
 
-client = TestClient(app)
+import pytest
 
+@pytest.fixture(autouse=True)
 def reset_rate_limits():
     _ip_attempts.clear()
+    yield
+    _ip_attempts.clear()
+
+client = TestClient(app)
 
 def test_1_opaque_token_generation_and_entropy():
     """Invariant 1: NFC credentials must be opaque, high-entropy, and non-predictable."""
@@ -324,6 +329,11 @@ def test_13_disabled_officer_account_handling():
     """Invariant 13: An active card for a disabled officer account must be rejected."""
     raw_token, cred_hash, masked_uid = generate_card_credential()
     with get_db_context() as db:
+        old_u = db.query(UserModel).filter_by(employee_id="EMP-DIS-999").first()
+        if old_u:
+            db.query(NFCOfficerCardModel).filter_by(user_id=old_u.id).delete()
+            db.delete(old_u)
+            db.commit()
         role = db.query(RoleModel).filter_by(name="ANALYST").first()
         disabled_user = UserModel(
             employee_id="EMP-DIS-999",

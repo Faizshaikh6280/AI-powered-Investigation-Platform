@@ -120,10 +120,10 @@ export default function UserProfileModal() {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md">
-      <div className="relative w-full max-w-2xl bg-card border border-border rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="relative w-full max-w-2xl bg-card border border-border rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[90vh]">
         
         {/* Header */}
-        <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-secondary/30">
+        <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-border flex items-center justify-between bg-secondary/30">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-primary/10 border border-primary/20 rounded-xl text-primary">
               <User className="w-5 h-5" />
@@ -142,7 +142,7 @@ export default function UserProfileModal() {
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex border-b border-border px-6 bg-secondary/10">
+        <div className="flex border-b border-border px-4 sm:px-6 bg-secondary/10 overflow-x-auto scrollbar-hide touch-scroll">
           {[
             { id: 'profile', label: 'Officer Profile' },
             { id: 'security', label: 'Change Password' },
@@ -152,7 +152,7 @@ export default function UserProfileModal() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`px-4 py-3 text-xs font-semibold border-b-2 transition-colors ${
+              className={`px-4 py-3 text-xs font-semibold border-b-2 transition-colors whitespace-nowrap ${
                 activeTab === tab.id
                   ? 'border-primary text-primary font-bold'
                   : 'border-transparent text-muted-foreground hover:text-foreground'
@@ -164,12 +164,12 @@ export default function UserProfileModal() {
         </div>
 
         {/* Content Area */}
-        <div className="p-6 overflow-y-auto flex-1 space-y-6">
+        <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-6">
           
           {/* PROFILE TAB */}
           {activeTab === 'profile' && (
             <div className="space-y-6">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="p-3.5 bg-secondary/40 border border-border rounded-xl">
                   <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1">
                     Officer Full Name
@@ -365,7 +365,7 @@ export default function UserProfileModal() {
                   <h5 className="text-xs font-bold text-foreground uppercase tracking-wider pt-2">
                     Step 2: Save Emergency Backup Recovery Codes
                   </h5>
-                  <div className="grid grid-cols-2 gap-2 bg-secondary/50 p-3 rounded-lg border border-border font-mono text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-secondary/50 p-3 rounded-lg border border-border font-mono text-xs">
                     {mfaSetupData.backup_codes.map((code, i) => (
                       <div key={i} className="text-foreground">{code}</div>
                     ))}

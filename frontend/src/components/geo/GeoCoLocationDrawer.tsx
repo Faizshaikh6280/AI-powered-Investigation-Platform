@@ -28,7 +28,7 @@ export const GeoCoLocationDrawer: React.FC<GeoCoLocationDrawerProps> = ({
   });
 
   return (
-    <div className="flex flex-col h-full bg-[#0b101b]/95 border-r border-border/80 text-xs w-96 backdrop-blur-xl">
+    <div className="flex flex-col h-full bg-card border-r border-border/80 text-xs w-96 backdrop-blur-xl">
       {/* Header */}
       <div className="p-3.5 border-b border-border/70 space-y-2">
         <div className="flex items-center justify-between">
@@ -170,7 +170,7 @@ export const GeoCoLocationDrawer: React.FC<GeoCoLocationDrawerProps> = ({
       </div>
 
       {/* Forensic Epistemic Disclaimer */}
-      <div className="p-2.5 bg-black/40 border-t border-border/60 text-[10px] text-muted-foreground flex items-start gap-1.5 leading-tight">
+      <div className="p-2.5 bg-secondary/50 border-t border-border/60 text-[10px] text-muted-foreground flex items-start gap-1.5 leading-tight">
         <ShieldCheck className="w-3.5 h-3.5 text-primary flex-shrink-0 mt-0.5" />
         <span>
           Co-location flags observational spatio-temporal overlap of device identifiers; does not assert physical meeting or collusion.

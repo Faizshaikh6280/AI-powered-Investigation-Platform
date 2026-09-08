@@ -1,8 +1,10 @@
 'use client';
+
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   Map as MapIcon, Users, Landmark, BookOpen, Crosshair, Filter, 
-  Download, Layers, RefreshCw, Activity, ShieldCheck, Sparkles, Navigation 
+  Download, Layers, RefreshCw, Activity, ShieldCheck, Sparkles, Navigation,
+  Search, ChevronDown, Compass, Check, MapPin, Eye, X
 } from 'lucide-react';
 
 import { useCase } from '../../context/CaseContext';
@@ -13,45 +15,45 @@ import {
 } from '../../services/apiClient';
 
 import { GeoDeckGLMap } from './GeoDeckGLMap';
-import { GeoPlaybackControls } from './GeoPlaybackControls';
+import { GeoMetricsRibbon } from './GeoMetricsRibbon';
+import { GeoFilterPanel, EntityFilterItem } from './GeoFilterPanel';
+import { GeoTimelinePlayback } from './GeoTimelinePlayback';
 import { GeoLegend } from './GeoLegend';
-import { GeoFilterPanel } from './GeoFilterPanel';
-import { GeoCoLocationDrawer } from './GeoCoLocationDrawer';
-import { GeoCommonPlacesPanel } from './GeoCommonPlacesPanel';
-import { GeoSpatialStoryPanel } from './GeoSpatialStoryPanel';
-import { GeoEventDetailDrawer } from './GeoEventDetailDrawer';
 import { GeoAreaInvestigationModal } from './GeoAreaInvestigationModal';
+import { GeoSpatialIntelligenceDrawer, GeoDrawerTab } from './GeoSpatialIntelligenceDrawer';
+import { cn } from '../../utils/cn';
 
-// Entity color palette for visually distinct trajectories
 const ENTITY_COLOR_PALETTE: Array<[number, number, number]> = [
+  [59, 130, 246],  // Blue (Aarav Sharma)
+  [244, 63, 94],   // Crimson / Rose (Riya Mehta)
+  [52, 211, 153],  // Emerald (Vikram Bedi)
+  [251, 191, 36],  // Amber (Kabir Singh)
+  [168, 85, 247],  // Purple (Aman Verma)
   [6, 182, 212],   // Cyan
-  [239, 68, 68],   // Crimson
-  [52, 211, 153],  // Emerald
-  [251, 191, 36],  // Amber
-  [168, 85, 247],  // Purple
   [244, 114, 182], // Pink
-  [59, 130, 246],  // Blue
   [249, 115, 22],  // Orange
-  [163, 230, 53],  // Lime
-  [14, 165, 233],  // Sky
 ];
 
 export const GeoWorkspace: React.FC<{ onViewOnGraph?: (entityId: string) => void }> = ({
   onViewOnGraph
 }) => {
-  const { activeCase, cases, setActiveCaseId } = useCase();
+  const { activeCase } = useCase();
   const { currentTime, setCurrentTime, timeRange, setTimeRange } = useTimelineStore();
 
   const [investigation, setInvestigation] = useState<GeoInvestigationResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Active side panel tab: 'NONE' | 'COLOCATIONS' | 'COMMON_PLACES' | 'STORY'
-  const [activeSidePanel, setActiveSidePanel] = useState<'NONE' | 'COLOCATIONS' | 'COMMON_PLACES' | 'STORY'>('NONE');
+  // Left Filter Panel Drawer (collapsible, 0px when closed)
+  const [showFilters, setShowFilters] = useState(false);
+
+  // Right Slider Intelligence Drawer (Story, Inspector, Co-Locations, Places)
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [activeDrawerTab, setActiveDrawerTab] = useState<GeoDrawerTab>('STORY');
 
   // Modals & Panels toggle
   const [isAreaModalOpen, setIsAreaModalOpen] = useState(false);
-  const [showFilterPanel, setShowFilterPanel] = useState(false);
-  const [showLegend, setShowLegend] = useState(true);
+  const [showLegend, setShowLegend] = useState(false);
+  const [isLiveTracking, setIsLiveTracking] = useState(false);
 
   // Layer Toggles
   const [showWaypoints, setShowWaypoints] = useState(true);
@@ -62,28 +64,26 @@ export const GeoWorkspace: React.FC<{ onViewOnGraph?: (entityId: string) => void
 
   // Playback state
   const [isPlaying, setIsPlaying] = useState(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState(10);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
 
   // Selection state
   const [selectedEvent, setSelectedEvent] = useState<GeoCanonicalEvent | null>(null);
-  const [areaModalCenter, setAreaModalCenter] = useState<[number, number]>([30.7410, 76.7680]);
+  const [selectedPlace, setSelectedPlace] = useState<CommonPlace | null>(null);
+  const [areaModalCenter, setAreaModalCenter] = useState<[number, number]>([30.7333, 76.7794]);
 
-  // Filters
+  // Synchronized Multi-Dimensional Filters
   const [selectedEntities, setSelectedEntities] = useState<string[]>([]);
   const [selectedDomains, setSelectedDomains] = useState<string[]>([]);
   const [minConfidence, setMinConfidence] = useState<number>(0);
+  const [timelineCategory, setTimelineCategory] = useState<'ALL' | 'LOCATION' | 'TRANSACTION' | 'CALL' | 'SOCIAL' | 'ANOMALY'>('ALL');
 
   const targetCaseId = activeCase?.case_id || 'INV-2026-BLACK-CIRCUIT';
 
-  // Load geo investigation data
+  // Load geo investigation data from backend
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.getGeoInvestigation(targetCaseId, {
-        entity_ids: selectedEntities.length > 0 ? selectedEntities : undefined,
-        domains: selectedDomains.length > 0 ? selectedDomains : undefined,
-        min_confidence: minConfidence > 0 ? minConfidence : undefined,
-      });
+      const res = await api.getGeoInvestigation(targetCaseId);
       setInvestigation(res);
 
       // Sync timeline range if available
@@ -95,19 +95,39 @@ export const GeoWorkspace: React.FC<{ onViewOnGraph?: (entityId: string) => void
         if (currentTime < minT || currentTime > maxT) {
           setCurrentTime(minT);
         }
+
+        // Default to the first hotspot if no event is selected
+        if (!selectedEvent && res.events.length > 0) {
+          const hotspot = res.events.find(e => e.anomaly_score > 0) || res.events[0];
+          setSelectedEvent(hotspot);
+        }
       }
     } catch (err) {
       console.error("Failed to load geospatial investigation:", err);
     } finally {
       setLoading(false);
     }
-  }, [targetCaseId, selectedEntities, selectedDomains, minConfidence, currentTime, setCurrentTime, setTimeRange]);
+  }, [targetCaseId, currentTime, setCurrentTime, setTimeRange]);
 
   useEffect(() => {
     loadData();
   }, [targetCaseId]);
 
-  // Map entities to stable colors
+  // Live Tracking loop
+  useEffect(() => {
+    if (!isLiveTracking) return;
+    const timer = setInterval(() => {
+      const next = currentTime + 1000 * 60 * 15; // advance 15 min
+      if (next >= timeRange[1]) {
+        setCurrentTime(timeRange[0]);
+      } else {
+        setCurrentTime(next);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isLiveTracking, currentTime, timeRange, setCurrentTime]);
+
+  // Stable entity colors
   const entityColors = useMemo(() => {
     const colors: Record<string, [number, number, number]> = {};
     if (!investigation) return colors;
@@ -119,57 +139,108 @@ export const GeoWorkspace: React.FC<{ onViewOnGraph?: (entityId: string) => void
     return colors;
   }, [investigation]);
 
-  const availableEntities = useMemo(() => {
+  // Available Entities list for filters
+  const availableEntities: EntityFilterItem[] = useMemo(() => {
     if (!investigation) return [];
-    const map = new Map<string, string>();
+    const counts = new Map<string, { name: string; count: number }>();
+    
     investigation.events.forEach(e => {
       const id = e.entity_id || 'UNKNOWN';
       const name = e.entity_name || id;
-      map.set(id, name);
+      const existing = counts.get(id);
+      if (!existing) {
+        counts.set(id, { name, count: 1 });
+      } else {
+        existing.count += 1;
+      }
     });
-    return Array.from(map.entries()).map(([id, name]) => ({
+
+    return Array.from(counts.entries()).map(([id, item]) => ({
       id,
-      name,
-      color: entityColors[name] || [6, 182, 212],
+      name: item.name,
+      color: entityColors[item.name] || [59, 130, 246],
+      eventCount: item.count,
     }));
   }, [investigation, entityColors]);
+
+  const entityNameMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    availableEntities.forEach(e => {
+      map[e.id] = e.name;
+    });
+    return map;
+  }, [availableEntities]);
 
   const availableDomains = useMemo(() => {
     if (!investigation) return [];
     return Array.from(new Set(investigation.events.map(e => e.domain)));
   }, [investigation]);
 
-  // Format waypoints for TripsLayer
-  const tripsWaypoints = useMemo(() => {
-    if (!investigation) return [];
-    const groups: Record<string, { cluster_id: string; entity_name: string; path: number[][]; timestamps: number[] }> = {};
-
-    investigation.events.forEach(ev => {
-      const key = ev.entity_name || ev.entity_id || 'UNKNOWN';
-      if (!groups[key]) {
-        groups[key] = {
-          cluster_id: key,
-          entity_name: key,
-          path: [],
-          timestamps: [],
-        };
+  // ================= BI-DIRECTIONAL FILTER SYNCHRONIZATION =================
+  const filteredEvents = useMemo(() => {
+    if (!investigation?.events) return [];
+    return investigation.events.filter(ev => {
+      // 1. Entity Filter
+      if (selectedEntities.length > 0) {
+        const matchesEntity = selectedEntities.includes(ev.entity_id || '') || 
+                              selectedEntities.includes(ev.entity_name || '');
+        if (!matchesEntity) return false;
       }
-      groups[key].path.push([ev.longitude, ev.latitude]);
-      groups[key].timestamps.push(ev.timestamp_ms);
-    });
 
-    return Object.values(groups).map(g => {
-      const sorted = g.timestamps.map((t, i) => ({ t, p: g.path[i] })).sort((a, b) => a.t - b.t);
-      return {
-        cluster_id: g.cluster_id,
-        entity_name: g.entity_name,
-        path: sorted.map(s => s.p),
-        timestamps: sorted.map(s => s.t),
-      };
+      // 2. Domain / Data Type Filter
+      if (selectedDomains.length > 0) {
+        if (!selectedDomains.includes(ev.domain)) return false;
+      }
+
+      // 3. Confidence Threshold Filter
+      if (minConfidence > 0) {
+        if ((ev.location_confidence || 1) < minConfidence) return false;
+      }
+
+      // 4. Category Tab Filter
+      if (timelineCategory === 'ANOMALY' && ev.anomaly_score <= 0) return false;
+      if (timelineCategory === 'TRANSACTION' && ev.domain !== 'FINANCIAL') return false;
+      if (timelineCategory === 'CALL' && ev.domain !== 'TELECOM') return false;
+      if (timelineCategory === 'SOCIAL' && ev.domain !== 'SOCIAL') return false;
+      if (timelineCategory === 'LOCATION') {
+        const isLoc = ev.domain === 'LOCATION' || (ev.domain !== 'FINANCIAL' && ev.domain !== 'TELECOM' && ev.domain !== 'SOCIAL');
+        if (!isLoc) return false;
+      }
+
+      return true;
     });
+  }, [investigation, selectedEntities, selectedDomains, minConfidence, timelineCategory]);
+
+  const filteredMovements = useMemo(() => {
+    if (!investigation?.movements) return [];
+    if (selectedEntities.length === 0) return investigation.movements;
+    return investigation.movements.filter(m => selectedEntities.includes(m.entity_id));
+  }, [investigation, selectedEntities]);
+
+  const filteredTripsWaypoints = useMemo(() => {
+    if (!investigation?.trips_waypoints) return [];
+    if (selectedEntities.length === 0) return investigation.trips_waypoints;
+    return investigation.trips_waypoints.filter(t => selectedEntities.includes(t.entity_id));
+  }, [investigation, selectedEntities]);
+
+  const filteredDensityGrid = useMemo(() => {
+    if (!investigation?.density_grid) return [];
+    return investigation.density_grid;
   }, [investigation]);
 
-  // Export handlers
+  const uniqueLocationsCount = useMemo(() => {
+    if (!investigation) return 0;
+    const set = new Set<string>();
+    filteredEvents.forEach(e => {
+      set.add(`${e.latitude.toFixed(3)},${e.longitude.toFixed(3)}`);
+    });
+    return Math.max(set.size, investigation.common_places?.length || 0);
+  }, [investigation, filteredEvents]);
+
+  const spatialAnomaliesCount = useMemo(() => {
+    return filteredEvents.filter(e => e.anomaly_score > 0).length;
+  }, [filteredEvents]);
+
   const handleExportGeoJSON = async () => {
     try {
       const data = await api.exportGeoDossier(targetCaseId, 'geojson');
@@ -194,242 +265,326 @@ export const GeoWorkspace: React.FC<{ onViewOnGraph?: (entityId: string) => void
     setSelectedEntities([]);
     setSelectedDomains([]);
     setMinConfidence(0);
+    setTimelineCategory('ALL');
+  };
+
+  const toggleDrawerTab = (tab: GeoDrawerTab) => {
+    if (isDrawerOpen && activeDrawerTab === tab) {
+      setIsDrawerOpen(false);
+    } else {
+      setActiveDrawerTab(tab);
+      setIsDrawerOpen(true);
+    }
   };
 
   return (
-    <div className="flex flex-col h-full w-full bg-background overflow-hidden relative">
-      {/* Top Navigation Bar */}
-      <header className="h-14 border-b border-border/80 bg-[#080d1a]/95 px-4 flex items-center justify-between z-20 backdrop-blur-md">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 font-bold text-foreground tracking-tight">
-            <div className="p-1.5 rounded-lg bg-primary/20 text-primary border border-primary/40">
-              <MapIcon className="w-4 h-4" />
-            </div>
-            <span className="text-sm">Geospatial Intelligence Engine</span>
+    <div className="flex flex-col h-full w-full bg-background overflow-hidden relative select-none">
+      {/* ─────────────────────────────────────────────────────────────
+          1. TOP COMMAND BAR (Light/Dark Theme-Consistent)
+         ───────────────────────────────────────────────────────────── */}
+      <div className="h-13 border-b border-border bg-card px-4 flex items-center justify-between z-20 flex-shrink-0">
+        {/* Left: Title + Live Correlation Badge */}
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="p-1.5 rounded-xl bg-primary/10 text-primary border border-primary/25 flex-shrink-0">
+            <MapIcon className="w-4 h-4" />
           </div>
-
-          <div className="h-4 w-px bg-border mx-1" />
-
-          {/* Case Selector Dropdown */}
-          <select
-            value={targetCaseId}
-            onChange={e => setActiveCaseId(e.target.value)}
-            className="bg-secondary/70 border border-border/70 rounded-md px-2.5 py-1 text-xs text-foreground font-medium focus:outline-none focus:border-primary"
-          >
-            {cases.map(c => (
-              <option key={c.case_id} value={c.case_id}>
-                {c.title || c.case_id}
-              </option>
-            ))}
-            {cases.length === 0 && (
-              <option value="INV-2026-BLACK-CIRCUIT">Operation Black Circuit</option>
-            )}
-          </select>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h1 className="text-sm font-bold text-foreground tracking-tight leading-none whitespace-nowrap">
+                Geospatial Intelligence
+              </h1>
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-[9px] font-bold text-emerald-500 uppercase tracking-wider">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                Live Correlation
+              </span>
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-0.5 hidden xl:block truncate">
+              Investigate physical movements, co-location convergence, and spatial anomalies
+            </p>
+          </div>
         </div>
 
-        {/* Investigative Module Switchers */}
-        <div className="flex items-center gap-1.5 bg-secondary/40 p-1 rounded-xl border border-border/60 text-xs">
+        {/* Center: Module Trigger Pills (Clean, Theme-Safe Badges) */}
+        <div className="hidden md:flex items-center gap-1 bg-secondary/50 p-1 rounded-xl border border-border text-xs">
+          {/* 1. Filters & Controls */}
           <button
-            onClick={() => setActiveSidePanel(activeSidePanel === 'COLOCATIONS' ? 'NONE' : 'COLOCATIONS')}
-            className={`px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5 transition-all ${
-              activeSidePanel === 'COLOCATIONS'
-                ? 'bg-primary text-primary-foreground font-bold shadow-md'
-                : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
-            }`}
+            onClick={() => setShowFilters(!showFilters)}
+            className={cn(
+              "px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 transition-all text-xs",
+              showFilters
+                ? "bg-primary text-primary-foreground shadow-xs"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+            )}
           >
-            <Users className="w-3.5 h-3.5" />
+            <Filter className="w-3.5 h-3.5" />
+            <span>Filters</span>
+            {selectedEntities.length > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-blue-500 text-white font-mono text-[9px] font-bold">
+                {selectedEntities.length}
+              </span>
+            )}
+          </button>
+
+          {/* 2. Story Insights (Slider Trigger) */}
+          <button
+            onClick={() => toggleDrawerTab('STORY')}
+            className={cn(
+              "px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 transition-all text-xs",
+              isDrawerOpen && activeDrawerTab === 'STORY'
+                ? "bg-purple-600 text-white shadow-xs"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+            )}
+          >
+            <BookOpen className={cn("w-3.5 h-3.5", isDrawerOpen && activeDrawerTab === 'STORY' ? "text-white" : "text-purple-500")} />
+            <span>Story Insights</span>
+            <span className={cn(
+              "px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold border",
+              isDrawerOpen && activeDrawerTab === 'STORY'
+                ? "bg-white/20 text-white border-white/30"
+                : "bg-secondary text-foreground border-border/60"
+            )}>
+              {investigation?.story_cards?.length || 0}
+            </span>
+          </button>
+
+          {/* 3. Co-Locations (Slider Trigger) */}
+          <button
+            onClick={() => toggleDrawerTab('COLOCATIONS')}
+            className={cn(
+              "px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 transition-all text-xs",
+              isDrawerOpen && activeDrawerTab === 'COLOCATIONS'
+                ? "bg-cyan-600 text-white shadow-xs"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+            )}
+          >
+            <Users className={cn("w-3.5 h-3.5", isDrawerOpen && activeDrawerTab === 'COLOCATIONS' ? "text-white" : "text-cyan-500")} />
             <span>Co-Locations</span>
-            {investigation && (
-              <span className="px-1.5 py-0.2 rounded-full bg-black/30 text-[10px] font-mono">
-                {investigation.co_locations.length}
-              </span>
-            )}
+            <span className={cn(
+              "px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold border",
+              isDrawerOpen && activeDrawerTab === 'COLOCATIONS'
+                ? "bg-white/20 text-white border-white/30"
+                : "bg-secondary text-foreground border-border/60"
+            )}>
+              {investigation?.co_locations?.length || 0}
+            </span>
           </button>
 
+          {/* 4. Common Places (Slider Trigger) */}
           <button
-            onClick={() => setActiveSidePanel(activeSidePanel === 'COMMON_PLACES' ? 'NONE' : 'COMMON_PLACES')}
-            className={`px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5 transition-all ${
-              activeSidePanel === 'COMMON_PLACES'
-                ? 'bg-primary text-primary-foreground font-bold shadow-md'
-                : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
-            }`}
+            onClick={() => toggleDrawerTab('COMMON_PLACES')}
+            className={cn(
+              "px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 transition-all text-xs",
+              isDrawerOpen && activeDrawerTab === 'COMMON_PLACES'
+                ? "bg-amber-600 text-white shadow-xs"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+            )}
           >
-            <Landmark className="w-3.5 h-3.5" />
+            <Landmark className={cn("w-3.5 h-3.5", isDrawerOpen && activeDrawerTab === 'COMMON_PLACES' ? "text-white" : "text-amber-500")} />
             <span>Common Places</span>
-            {investigation && (
-              <span className="px-1.5 py-0.2 rounded-full bg-black/30 text-[10px] font-mono">
-                {investigation.common_places.length}
-              </span>
-            )}
+            <span className={cn(
+              "px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold border",
+              isDrawerOpen && activeDrawerTab === 'COMMON_PLACES'
+                ? "bg-white/20 text-white border-white/30"
+                : "bg-secondary text-foreground border-border/60"
+            )}>
+              {investigation?.common_places?.length || 0}
+            </span>
           </button>
 
+          {/* 5. Location Inspector (Slider Trigger) */}
           <button
-            onClick={() => setActiveSidePanel(activeSidePanel === 'STORY' ? 'NONE' : 'STORY')}
-            className={`px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5 transition-all ${
-              activeSidePanel === 'STORY'
-                ? 'bg-primary text-primary-foreground font-bold shadow-md'
-                : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
-            }`}
+            onClick={() => toggleDrawerTab('INSPECTOR')}
+            className={cn(
+              "px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 transition-all text-xs",
+              isDrawerOpen && activeDrawerTab === 'INSPECTOR'
+                ? "bg-primary text-primary-foreground shadow-xs"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+            )}
           >
-            <BookOpen className="w-3.5 h-3.5" />
-            <span>Spatial Story</span>
+            <MapPin className="w-3.5 h-3.5 text-rose-500" />
+            <span>Inspector</span>
           </button>
 
+          {/* 6. Geofence Scan */}
           <button
             onClick={() => setIsAreaModalOpen(true)}
-            className="px-3 py-1.5 rounded-lg font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 flex items-center gap-1.5 transition-all"
+            className="px-3 py-1.5 rounded-lg font-semibold text-emerald-500 bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 flex items-center gap-1.5 transition-all text-xs"
           >
             <Crosshair className="w-3.5 h-3.5" />
-            <span>Geofence Area Scan</span>
+            <span>Geofence Scan</span>
           </button>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex items-center gap-2">
+        {/* Right Action Buttons */}
+        <div className="flex items-center gap-2 flex-shrink-0">
           <button
-            onClick={() => setShowFilterPanel(!showFilterPanel)}
-            className={`p-2 rounded-lg border text-xs flex items-center gap-1.5 transition-colors ${
-              showFilterPanel
-                ? 'bg-primary/20 border-primary text-primary'
-                : 'bg-secondary/50 border-border text-muted-foreground hover:text-foreground'
-            }`}
-            title="Toggle Filter Sidebar"
+            onClick={handleExportGeoJSON}
+            className="px-2.5 py-1.5 rounded-lg bg-secondary hover:bg-secondary/80 border border-border text-foreground text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-2xs"
           >
-            <Filter className="w-4 h-4" />
+            <Download className="w-3.5 h-3.5" />
+            <span>Export</span>
           </button>
 
           <button
             onClick={() => setShowLegend(!showLegend)}
-            className={`p-2 rounded-lg border text-xs flex items-center gap-1.5 transition-colors ${
-              showLegend
-                ? 'bg-primary/20 border-primary text-primary'
-                : 'bg-secondary/50 border-border text-muted-foreground hover:text-foreground'
-            }`}
-            title="Toggle Map Layers & Legend"
+            className={cn(
+              "p-1.5 rounded-lg border border-border text-xs transition-colors",
+              showLegend ? "bg-primary/10 text-primary border-primary/30" : "bg-secondary text-muted-foreground hover:text-foreground"
+            )}
+            title="Toggle Layer Legend"
           >
             <Layers className="w-4 h-4" />
           </button>
 
           <button
-            onClick={handleExportGeoJSON}
-            className="p-2 rounded-lg bg-secondary/50 border border-border text-muted-foreground hover:text-foreground transition-colors"
-            title="Export GeoJSON Dossier"
-          >
-            <Download className="w-4 h-4" />
-          </button>
-
-          <button
             onClick={loadData}
-            className="p-2 rounded-lg bg-secondary/50 border border-border text-muted-foreground hover:text-foreground transition-colors"
-            title="Refresh Geospatial Data"
+            className="p-1.5 rounded-lg bg-secondary hover:bg-secondary/80 border border-border text-muted-foreground hover:text-foreground transition-colors"
+            title="Refresh Data"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={cn("w-4 h-4", loading && "animate-spin text-primary")} />
           </button>
         </div>
-      </header>
+      </div>
 
-      {/* Main Investigation Workspace */}
-      <div className="flex-1 flex overflow-hidden relative">
-        {/* Left Side Sliding Drawers */}
-        {activeSidePanel === 'COLOCATIONS' && investigation && (
-          <GeoCoLocationDrawer
-            coLocations={investigation.co_locations}
-            onSelectCoLocation={co => {
-              setSelectedEvent({
-                geo_event_id: `COLOC-MID-${co.co_location_id}`,
-                event_id: co.supporting_events[0] || '',
-                case_id: targetCaseId,
-                latitude: co.latitude,
-                longitude: co.longitude,
-                timestamp: co.start_time,
-                timestamp_ms: new Date(co.start_time).getTime(),
-                raw_timestamp: co.start_time,
-                location_type: 'GPS' as any,
-                accuracy_radius_meters: co.distance_between_meters || 100,
-                location_confidence: 0.9,
-                location_name: co.location_name,
-                domain: 'CORRELATION',
-                event_type: 'CO_LOCATION',
-                raw_evidence_id: co.co_location_id,
-                anomaly_score: co.correlation_score,
-                anomaly_reasons: [`Co-location observed between ${co.entity_names.join(' & ')}`],
-                epistemic_status: 'OBSERVED',
-                metadata: { co_location: co },
-              });
-            }}
-            onViewOnGraph={onViewOnGraph}
-          />
+      {/* Mobile Sub-Command Trigger Strip (md:hidden) */}
+      <div className="md:hidden flex items-center gap-1.5 px-3 py-1.5 border-b border-border bg-card/95 overflow-x-auto scrollbar-hide touch-scroll z-20 flex-shrink-0">
+        <button
+          onClick={() => setShowFilters(!showFilters)}
+          className={cn(
+            "px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1 text-xs flex-shrink-0 transition-all",
+            showFilters
+              ? "bg-primary text-primary-foreground shadow-xs"
+              : "text-muted-foreground hover:text-foreground bg-secondary/60"
+          )}
+        >
+          <Filter className="w-3.5 h-3.5" />
+          <span>Filters</span>
+          {selectedEntities.length > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full bg-blue-500 text-white font-mono text-[9px] font-bold">
+              {selectedEntities.length}
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => toggleDrawerTab('STORY')}
+          className={cn(
+            "px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1 text-xs flex-shrink-0 transition-all",
+            isDrawerOpen && activeDrawerTab === 'STORY'
+              ? "bg-purple-600 text-white shadow-xs"
+              : "text-muted-foreground hover:text-foreground bg-secondary/60"
+          )}
+        >
+          <BookOpen className={cn("w-3.5 h-3.5", isDrawerOpen && activeDrawerTab === 'STORY' ? "text-white" : "text-purple-500")} />
+          <span>Story ({investigation?.story_cards?.length || 0})</span>
+        </button>
+
+        <button
+          onClick={() => toggleDrawerTab('COLOCATIONS')}
+          className={cn(
+            "px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1 text-xs flex-shrink-0 transition-all",
+            isDrawerOpen && activeDrawerTab === 'COLOCATIONS'
+              ? "bg-cyan-600 text-white shadow-xs"
+              : "text-muted-foreground hover:text-foreground bg-secondary/60"
+          )}
+        >
+          <Users className={cn("w-3.5 h-3.5", isDrawerOpen && activeDrawerTab === 'COLOCATIONS' ? "text-white" : "text-cyan-500")} />
+          <span>Co-Locations ({investigation?.co_locations?.length || 0})</span>
+        </button>
+
+        <button
+          onClick={() => toggleDrawerTab('COMMON_PLACES')}
+          className={cn(
+            "px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1 text-xs flex-shrink-0 transition-all",
+            isDrawerOpen && activeDrawerTab === 'COMMON_PLACES'
+              ? "bg-amber-600 text-white shadow-xs"
+              : "text-muted-foreground hover:text-foreground bg-secondary/60"
+          )}
+        >
+          <Landmark className={cn("w-3.5 h-3.5", isDrawerOpen && activeDrawerTab === 'COMMON_PLACES' ? "text-white" : "text-amber-500")} />
+          <span>Places ({investigation?.common_places?.length || 0})</span>
+        </button>
+
+        <button
+          onClick={() => toggleDrawerTab('INSPECTOR')}
+          className={cn(
+            "px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1 text-xs flex-shrink-0 transition-all",
+            isDrawerOpen && activeDrawerTab === 'INSPECTOR'
+              ? "bg-primary text-primary-foreground shadow-xs"
+              : "text-muted-foreground hover:text-foreground bg-secondary/60"
+          )}
+        >
+          <MapPin className="w-3.5 h-3.5 text-rose-500" />
+          <span>Inspector</span>
+        </button>
+
+        <button
+          onClick={() => setIsAreaModalOpen(true)}
+          className="px-2.5 py-1 rounded-lg font-semibold text-emerald-500 bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 flex items-center gap-1 text-xs flex-shrink-0 transition-all"
+        >
+          <Crosshair className="w-3.5 h-3.5" />
+          <span>Scan</span>
+        </button>
+      </div>
+
+      {/* ─────────────────────────────────────────────────────────────
+          2. TOP KPI BANNER (Theme-Consistent)
+         ───────────────────────────────────────────────────────────── */}
+      <GeoMetricsRibbon
+        totalEvents={filteredEvents.length}
+        uniqueLocations={uniqueLocationsCount}
+        entitiesCount={selectedEntities.length > 0 ? selectedEntities.length : availableEntities.length}
+        movementPatterns={filteredMovements.length}
+        spatialAnomalies={spatialAnomaliesCount}
+        highInterestAreas={investigation?.common_places.length || 0}
+        isLoading={loading}
+      />
+
+      {/* ─────────────────────────────────────────────────────────────
+          3. CORE 3-COLUMN CANVAS (Spacious Hero Map + Right Slider)
+         ───────────────────────────────────────────────────────────── */}
+      <div className="flex-1 min-h-0 flex overflow-hidden relative">
+        {/* Left Column: Interactive Collapsible Filters Drawer */}
+        {showFilters && (
+          <>
+            <div 
+              onClick={() => setShowFilters(false)}
+              className="fixed inset-0 bg-black/50 z-30 md:hidden backdrop-blur-xs" 
+            />
+            <div className="fixed md:static inset-y-0 left-0 z-40 md:z-20 w-72 max-w-[85vw] flex-shrink-0 h-full border-r border-border bg-card shadow-2xl md:shadow-none animate-in slide-in-from-left duration-200">
+              <GeoFilterPanel
+                availableEntities={availableEntities}
+                selectedEntities={selectedEntities}
+                setSelectedEntities={setSelectedEntities}
+                availableDomains={availableDomains}
+                selectedDomains={selectedDomains}
+                setSelectedDomains={setSelectedDomains}
+                minConfidence={minConfidence}
+                setMinConfidence={setMinConfidence}
+                timeRange={timeRange}
+                onTimeRangeChange={(start, end) => setTimeRange([start, end])}
+                onResetFilters={resetFilters}
+                onClose={() => setShowFilters(false)}
+              />
+            </div>
+          </>
         )}
 
-        {activeSidePanel === 'COMMON_PLACES' && investigation && (
-          <GeoCommonPlacesPanel
-            commonPlaces={investigation.common_places}
-            onSelectPlace={place => {
-              setSelectedEvent({
-                geo_event_id: `HUB-${place.place_id}`,
-                event_id: place.place_id,
-                case_id: targetCaseId,
-                latitude: place.latitude,
-                longitude: place.longitude,
-                timestamp: place.time_spans[0] || new Date().toISOString(),
-                timestamp_ms: new Date(place.time_spans[0] || Date.now()).getTime(),
-                raw_timestamp: place.time_spans[0] || '',
-                location_type: place.location_type,
-                accuracy_radius_meters: place.radius_meters,
-                location_confidence: 0.95,
-                location_name: place.place_name,
-                domain: place.dominant_domain,
-                event_type: 'SPATIAL_HUB',
-                raw_evidence_id: place.place_id,
-                anomaly_score: 0,
-                anomaly_reasons: [],
-                epistemic_status: 'DERIVED',
-                metadata: { place },
-              });
-            }}
-          />
-        )}
-
-        {activeSidePanel === 'STORY' && investigation && (
-          <GeoSpatialStoryPanel
-            storyCards={investigation.story_cards}
-            onSelectCard={card => {
-              setSelectedEvent({
-                geo_event_id: card.card_id,
-                event_id: card.card_id,
-                case_id: targetCaseId,
-                entity_id: card.entity_id,
-                entity_name: card.entity_name,
-                latitude: card.coordinates[0],
-                longitude: card.coordinates[1],
-                timestamp: card.timestamp,
-                timestamp_ms: new Date(card.timestamp).getTime(),
-                raw_timestamp: card.timestamp,
-                location_type: 'GPS' as any,
-                accuracy_radius_meters: 50,
-                location_confidence: 0.95,
-                location_name: card.location_name,
-                domain: 'LOCATION',
-                event_type: 'STORY_MILESTONE',
-                raw_evidence_id: card.evidence_refs[0] || 'STORY',
-                anomaly_score: card.anomalies.length > 0 ? 80 : 0,
-                anomaly_reasons: card.anomalies,
-                epistemic_status: 'OBSERVED',
-                metadata: { story: card },
-              });
-            }}
-          />
-        )}
-
-        {/* Center: Interactive DeckGL Map */}
-        <div className="flex-1 h-full w-full relative">
+        {/* Center Hero Map: Occupies all available width! */}
+        <div className="flex-1 min-w-0 h-full relative">
           <GeoDeckGLMap
-            events={investigation?.events || []}
-            movements={investigation?.movements || []}
-            tripsWaypoints={tripsWaypoints}
-            densityGrid={investigation?.density_grid || []}
+            events={filteredEvents}
+            movements={filteredMovements}
+            tripsWaypoints={filteredTripsWaypoints}
+            densityGrid={filteredDensityGrid}
+            commonPlaces={investigation?.common_places || []}
             selectedEvent={selectedEvent}
-            onSelectEvent={ev => setSelectedEvent(ev)}
+            onSelectEvent={ev => {
+              setSelectedEvent(ev);
+              setSelectedPlace(null);
+              setActiveDrawerTab('INSPECTOR');
+              setIsDrawerOpen(true);
+            }}
             onMapClickCoordinates={handleMapClick}
             currentTime={currentTime}
             timeRange={timeRange}
@@ -440,28 +595,20 @@ export const GeoWorkspace: React.FC<{ onViewOnGraph?: (entityId: string) => void
             showCoverage={showCoverage}
             showHeatmap={showHeatmap}
             initialCenter={investigation?.summary_metrics?.center}
+            isLiveTracking={isLiveTracking}
+            setIsLiveTracking={setIsLiveTracking}
+            onOpenLegend={() => setShowLegend(!showLegend)}
+            onTriggerScan={() => setIsAreaModalOpen(true)}
+            onToggleInspector={() => {
+              setActiveDrawerTab('INSPECTOR');
+              setIsDrawerOpen(!isDrawerOpen);
+            }}
+            showInspector={isDrawerOpen && activeDrawerTab === 'INSPECTOR'}
           />
 
-          {/* Floating Filter Panel (Top Left) */}
-          {showFilterPanel && (
-            <div className="absolute top-4 left-4 z-30 max-w-sm">
-              <GeoFilterPanel
-                availableEntities={availableEntities}
-                selectedEntities={selectedEntities}
-                setSelectedEntities={setSelectedEntities}
-                availableDomains={availableDomains}
-                selectedDomains={selectedDomains}
-                setSelectedDomains={setSelectedDomains}
-                minConfidence={minConfidence}
-                setMinConfidence={setMinConfidence}
-                onResetFilters={resetFilters}
-              />
-            </div>
-          )}
-
-          {/* Floating Map Legend & Layer Visibility (Bottom Left) */}
+          {/* Floating Map Legend (Bottom Left) */}
           {showLegend && (
-            <div className="absolute bottom-4 left-4 z-30">
+            <div className="absolute bottom-12 left-4 z-30">
               <GeoLegend
                 showWaypoints={showWaypoints}
                 setShowWaypoints={setShowWaypoints}
@@ -477,39 +624,102 @@ export const GeoWorkspace: React.FC<{ onViewOnGraph?: (entityId: string) => void
             </div>
           )}
 
-          {/* Floating Playback Scrubber (Bottom Center) */}
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 w-full max-w-xl px-4">
-            <GeoPlaybackControls
-              currentTime={currentTime}
-              setCurrentTime={setCurrentTime}
-              timeRange={timeRange}
-              isPlaying={isPlaying}
-              setIsPlaying={setIsPlaying}
-              playbackSpeed={playbackSpeed}
-              setPlaybackSpeed={setPlaybackSpeed}
-            />
-          </div>
+          {/* Active Filter Pill Overlay on Map */}
+          {(selectedEntities.length > 0 || timelineCategory !== 'ALL' || selectedDomains.length > 0) && (
+            <div className="absolute top-4 left-4 z-30 bg-card/95 border border-primary/40 text-foreground px-3 py-1.5 rounded-xl flex items-center gap-2 text-xs shadow-xl backdrop-blur-md">
+              <Filter className="w-3.5 h-3.5 text-primary" />
+              <span className="font-semibold text-primary">Map Filtered:</span>
+              <span className="text-foreground">
+                {selectedEntities.length > 0 ? `${selectedEntities.map(id => entityNameMap[id] || id).join(', ')}` : ''}
+                {timelineCategory !== 'ALL' ? ` [${timelineCategory}]` : ''}
+              </span>
+              <button
+                onClick={resetFilters}
+                className="ml-1 text-[10px] text-muted-foreground hover:text-foreground bg-secondary px-1.5 py-0.5 rounded transition-colors"
+              >
+                Clear
+              </button>
+            </div>
+          )}
 
           {/* Loading Indicator */}
           {loading && (
-            <div className="absolute top-4 right-4 z-30 bg-[#0b101b]/90 border border-primary/40 px-3 py-1.5 rounded-lg flex items-center gap-2 text-xs font-mono text-primary shadow-xl backdrop-blur-md">
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 bg-card/95 border border-primary/40 px-3 py-1.5 rounded-xl flex items-center gap-2 text-xs font-mono text-primary shadow-xl backdrop-blur-md">
               <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-              <span>Synthesizing Geo Intelligence...</span>
+              <span>Correlating Geospatial Traces...</span>
             </div>
           )}
         </div>
 
-        {/* Right Event Detail Drawer */}
-        {selectedEvent && (
-          <GeoEventDetailDrawer
-            event={selectedEvent}
-            onClose={() => setSelectedEvent(null)}
-            onViewOnGraph={onViewOnGraph}
-          />
-        )}
+        {/* ─────────────────────────────────────────────────────────────
+            Right Column: Unified Slide-Out Intelligence Drawer
+            (Story Insights, Inspector, Co-Locations, Common Places)
+           ───────────────────────────────────────────────────────────── */}
+        <GeoSpatialIntelligenceDrawer
+          isOpen={isDrawerOpen}
+          activeTab={activeDrawerTab}
+          onTabChange={setActiveDrawerTab}
+          onClose={() => setIsDrawerOpen(false)}
+          storyCards={investigation?.story_cards || []}
+          onSelectStoryCard={card => {
+            const cardTimeMs = card.timestamp ? new Date(card.timestamp).getTime() : Date.now();
+            const ev = investigation?.events.find(e => e.geo_event_id === card.card_id || (Math.abs(e.latitude - card.coordinates[0]) < 0.005 && Math.abs(e.longitude - card.coordinates[1]) < 0.005)) || null;
+            if (ev) setSelectedEvent(ev);
+            if (cardTimeMs) setCurrentTime(cardTimeMs);
+          }}
+          selectedEvent={selectedEvent}
+          selectedPlace={selectedPlace}
+          allEvents={investigation?.events || []}
+          onViewOnGraph={onViewOnGraph}
+          onFocusTime={t => setCurrentTime(t)}
+          onInvestigateArea={(lat, lng) => {
+            setAreaModalCenter([lat, lng]);
+            setIsAreaModalOpen(true);
+          }}
+          coLocations={investigation?.co_locations || []}
+          onSelectCoLocation={co => {
+            const ev = investigation?.events.find(e => Math.abs(e.latitude - co.latitude) < 0.01 && Math.abs(e.longitude - co.longitude) < 0.01) || null;
+            if (ev) setSelectedEvent(ev);
+            setSelectedPlace(null);
+          }}
+          commonPlaces={investigation?.common_places || []}
+          onSelectPlace={place => {
+            setSelectedPlace(place);
+            const ev = investigation?.events.find(e => Math.abs(e.latitude - place.latitude) < 0.01 && Math.abs(e.longitude - place.longitude) < 0.01) || null;
+            if (ev) setSelectedEvent(ev);
+          }}
+        />
       </div>
 
-      {/* Geofence Area Investigation Modal */}
+      {/* ─────────────────────────────────────────────────────────────
+          4. BOTTOM MULTI-TRACK TIMELINE (Synchronized)
+         ───────────────────────────────────────────────────────────── */}
+      <GeoTimelinePlayback
+        events={investigation?.events || []}
+        currentTime={currentTime}
+        setCurrentTime={setCurrentTime}
+        timeRange={timeRange}
+        setTimeRange={setTimeRange}
+        isPlaying={isPlaying}
+        setIsPlaying={setIsPlaying}
+        playbackSpeed={playbackSpeed}
+        setPlaybackSpeed={setPlaybackSpeed}
+        entityColors={entityColors}
+        selectedEntities={selectedEntities}
+        setSelectedEntities={setSelectedEntities}
+        activeCategoryTab={timelineCategory}
+        setActiveCategoryTab={setTimelineCategory}
+        onSelectEvent={ev => {
+          setSelectedEvent(ev);
+          setSelectedPlace(null);
+          setActiveDrawerTab('INSPECTOR');
+          setIsDrawerOpen(true);
+        }}
+      />
+
+      {/* ─────────────────────────────────────────────────────────────
+          5. GEOFENCE AREA INVESTIGATION MODAL
+         ───────────────────────────────────────────────────────────── */}
       {isAreaModalOpen && (
         <GeoAreaInvestigationModal
           caseId={targetCaseId}
@@ -528,7 +738,7 @@ export const GeoWorkspace: React.FC<{ onViewOnGraph?: (entityId: string) => void
               location_type: 'GPS' as any,
               accuracy_radius_meters: 500,
               location_confidence: 1.0,
-              location_name: `Geofence Center (${lat.toFixed(4)}, ${lng.toFixed(4)})`,
+              location_name: `Geofence Scan Center (${lat.toFixed(4)}, ${lng.toFixed(4)})`,
               domain: 'ANALYTICAL',
               event_type: 'GEOFENCE_CENTER',
               raw_evidence_id: 'SCAN',
@@ -537,9 +747,12 @@ export const GeoWorkspace: React.FC<{ onViewOnGraph?: (entityId: string) => void
               epistemic_status: 'OBSERVED',
               metadata: {},
             });
+            setActiveDrawerTab('INSPECTOR');
+            setIsDrawerOpen(true);
           }}
         />
       )}
     </div>
   );
 };
+export default GeoWorkspace;

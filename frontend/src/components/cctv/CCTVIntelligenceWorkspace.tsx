@@ -194,11 +194,11 @@ export const CCTVIntelligenceWorkspace: React.FC<Props> = ({ activeCase }) => {
       )}
 
       {/* Main Top Header */}
-      <div className="px-6 py-4 border-b border-border bg-panel/60 backdrop-blur-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 flex-shrink-0">
+      <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-border bg-panel/60 backdrop-blur-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 flex-shrink-0">
         <div className="space-y-0.5">
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-primary animate-pulse" />
-            <h1 className="text-lg font-bold text-foreground tracking-tight">
+            <h1 className="text-base sm:text-lg font-bold text-foreground tracking-tight">
               CCTV Location &amp; Route Intelligence
             </h1>
             <span className="text-[10px] font-bold uppercase tracking-wider text-primary bg-primary/10 px-2 py-0.5 rounded-full border border-primary/20">
@@ -210,11 +210,11 @@ export const CCTVIntelligenceWorkspace: React.FC<Props> = ({ activeCase }) => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2 sm:gap-2.5">
           <button
             type="button"
             onClick={() => setIsManualModalOpen(true)}
-            className="text-xs font-semibold px-3 py-1.5 rounded-xl border border-border text-foreground hover:bg-secondary hover:border-border/80 transition-colors flex items-center gap-1.5 shadow-sm"
+            className="text-xs font-semibold px-2.5 sm:px-3 py-1.5 rounded-xl border border-border text-foreground hover:bg-secondary hover:border-border/80 transition-colors flex items-center gap-1.5 shadow-sm"
           >
             <Plus className="w-3.5 h-3.5 text-primary" />
             <span>Add CCTV Source</span>
@@ -224,7 +224,7 @@ export const CCTVIntelligenceWorkspace: React.FC<Props> = ({ activeCase }) => {
             type="button"
             onClick={() => handleRunAnalysis()}
             disabled={isLoading}
-            className="text-xs font-bold px-3.5 py-1.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm flex items-center gap-1.5"
+            className="text-xs font-bold px-3 sm:px-3.5 py-1.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm flex items-center gap-1.5"
           >
             <RotateCcw className={cn("w-3.5 h-3.5", isLoading && "animate-spin")} />
             <span>{isLoading ? 'Analyzing...' : 'Re-Run Intelligence'}</span>
@@ -233,10 +233,10 @@ export const CCTVIntelligenceWorkspace: React.FC<Props> = ({ activeCase }) => {
       </div>
 
       {/* Content Container */}
-      <div className="p-6 space-y-6 flex-1">
+      <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 flex-1">
         
         {/* ── THREE-ZONE LAYOUT (Incident Panel | Interactive Map | Quick Summary) ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 min-h-[500px]">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 min-h-[380px] lg:min-h-[500px]">
           
           {/* ZONE 1: INCIDENT CRIME SCENE (3 cols) */}
           <div className="lg:col-span-3 flex flex-col justify-between">
@@ -252,7 +252,7 @@ export const CCTVIntelligenceWorkspace: React.FC<Props> = ({ activeCase }) => {
           </div>
 
           {/* ZONE 2: PRIMARY INTERACTIVE MAP (6 cols) */}
-          <div className="lg:col-span-6 h-[500px] lg:h-auto min-h-[480px]">
+          <div className="lg:col-span-6 h-[340px] sm:h-[480px] lg:h-auto min-h-[320px] sm:min-h-[480px]">
             <CCTVMap
               location={location}
               sources={sources}
@@ -351,15 +351,15 @@ export const CCTVIntelligenceWorkspace: React.FC<Props> = ({ activeCase }) => {
         </div>
 
         {/* ── BOTTOM TABS & WORKSPACE PANELS ── */}
-        <div className="bg-card/90 backdrop-blur-md border border-border rounded-2xl p-6 shadow-lg space-y-5">
+        <div className="bg-card/90 backdrop-blur-md border border-border rounded-2xl p-4 sm:p-6 shadow-lg space-y-4 sm:space-y-5">
           {/* Navigation Tabs */}
-          <div className="flex items-center justify-between border-b border-border pb-3 flex-wrap gap-2">
-            <div className="flex items-center gap-2">
+          <div className="flex items-center justify-between border-b border-border pb-3 gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto scrollbar-hide touch-scroll w-full sm:w-auto pb-1">
               <button
                 type="button"
                 onClick={() => setActiveTab('SOURCES')}
                 className={cn(
-                  "text-xs font-bold px-4 py-2 rounded-xl transition-colors flex items-center gap-2",
+                  "text-xs font-bold px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl transition-colors flex items-center gap-1.5 sm:gap-2 whitespace-nowrap flex-shrink-0",
                   activeTab === 'SOURCES'
                     ? "bg-primary text-primary-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground hover:bg-secondary"
@@ -373,7 +373,7 @@ export const CCTVIntelligenceWorkspace: React.FC<Props> = ({ activeCase }) => {
                 type="button"
                 onClick={() => setActiveTab('ROUTES')}
                 className={cn(
-                  "text-xs font-bold px-4 py-2 rounded-xl transition-colors flex items-center gap-2",
+                  "text-xs font-bold px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl transition-colors flex items-center gap-1.5 sm:gap-2 whitespace-nowrap flex-shrink-0",
                   activeTab === 'ROUTES'
                     ? "bg-primary text-primary-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground hover:bg-secondary"
@@ -387,33 +387,33 @@ export const CCTVIntelligenceWorkspace: React.FC<Props> = ({ activeCase }) => {
                 type="button"
                 onClick={() => setActiveTab('CONTACTS')}
                 className={cn(
-                  "text-xs font-bold px-4 py-2 rounded-xl transition-colors flex items-center gap-2",
+                  "text-xs font-bold px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl transition-colors flex items-center gap-1.5 sm:gap-2 whitespace-nowrap flex-shrink-0",
                   activeTab === 'CONTACTS'
                     ? "bg-primary text-primary-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground hover:bg-secondary"
                 )}
               >
                 <Phone className="w-4 h-4" />
-                <span>Contacts Directory</span>
+                <span>Contacts</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setActiveTab('SUMMARY')}
                 className={cn(
-                  "text-xs font-bold px-4 py-2 rounded-xl transition-colors flex items-center gap-2",
+                  "text-xs font-bold px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl transition-colors flex items-center gap-1.5 sm:gap-2 whitespace-nowrap flex-shrink-0",
                   activeTab === 'SUMMARY'
                     ? "bg-primary text-primary-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground hover:bg-secondary"
                 )}
               >
                 <FileText className="w-4 h-4" />
-                <span>Investigation Summary</span>
+                <span>Summary</span>
               </button>
             </div>
 
-            <div className="text-xs text-muted-foreground font-medium hidden sm:block">
-              Case Context: <span className="text-foreground font-bold">{activeCase?.case_reference || 'CASE-ACTIVE'}</span>
+            <div className="text-xs text-muted-foreground font-medium hidden lg:block whitespace-nowrap">
+              Case: <span className="text-foreground font-bold">{activeCase?.case_reference || 'CASE-ACTIVE'}</span>
             </div>
           </div>
 

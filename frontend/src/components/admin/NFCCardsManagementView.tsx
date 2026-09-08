@@ -161,8 +161,8 @@ export default function NFCCardsManagementView({ users, onRefreshUsers }: Props)
 
       {/* Cards Table */}
       <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+        <div className="overflow-x-auto touch-scroll">
+          <table className="w-full text-left text-xs min-w-[780px]">
             <thead className="bg-secondary/40 border-b border-border text-muted-foreground uppercase tracking-wider font-semibold">
               <tr>
                 <th className="px-4 py-3">Card Identifier</th>
@@ -302,7 +302,7 @@ export default function NFCCardsManagementView({ users, onRefreshUsers }: Props)
       {/* MODAL: Issue NFC Card */}
       {isIssueModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="relative w-full max-w-lg bg-card border border-border rounded-2xl shadow-2xl p-6 space-y-4 animate-in fade-in zoom-in-95">
+          <div className="relative w-full max-w-lg bg-card border border-border rounded-2xl shadow-2xl p-4 sm:p-6 space-y-4 animate-in fade-in zoom-in-95 max-h-[92vh] sm:max-h-[85vh] overflow-y-auto">
             
             <div className="flex items-center justify-between border-b border-border pb-3">
               <div className="flex items-center gap-2">
@@ -433,7 +433,7 @@ export default function NFCCardsManagementView({ users, onRefreshUsers }: Props)
       {/* MODAL: Replace NFC Card */}
       {replaceCardId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="relative w-full max-w-sm bg-card border border-border rounded-2xl shadow-2xl p-6 space-y-4">
+          <div className="relative w-full max-w-sm bg-card border border-border rounded-2xl shadow-2xl p-4 sm:p-6 space-y-4 max-h-[92vh] overflow-y-auto">
             <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
               <KeyRound className="w-4 h-4 text-primary" />
               Replace Officer Smartcard

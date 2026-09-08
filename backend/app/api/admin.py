@@ -24,6 +24,7 @@ from app.models.iam_models import (
 )
 from app.authorization.dependencies import require_permission, get_client_ip
 from app.authorization.permissions import Permissions
+from app.authorization.roles import Roles
 from app.audit.audit_service import record_audit_event, AuditAction
 from app.auth.session import revoke_all_user_sessions
 
@@ -62,6 +63,7 @@ def list_users(
     role: Optional[str] = None,
     unit: Optional[str] = None,
     status_filter: Optional[str] = None,
+    status: Optional[str] = None,
     search: Optional[str] = None,
     current_user: UserModel = Depends(require_permission(Permissions.USER_VIEW)),
     db: Session = Depends(get_db)
@@ -69,17 +71,19 @@ def list_users(
     """Lists officers and accounts with role, unit, status, and MFA enrollment state."""
     query = db.query(UserModel)
 
-    if role:
-        query = query.join(RoleModel).filter(RoleModel.name == role)
-    if unit:
-        query = query.filter(UserModel.unit_id == unit)
-    if status_filter:
-        query = query.filter(UserModel.status == status_filter.upper())
-    if search:
+    effective_status = status_filter or status
+    if role and role.upper() != "UNDEFINED" and role.strip():
+        query = query.join(RoleModel).filter(RoleModel.name == role.strip())
+    if unit and unit.upper() != "UNDEFINED" and unit.strip():
+        query = query.filter(UserModel.unit_id == unit.strip())
+    if effective_status and effective_status.upper() != "UNDEFINED" and effective_status.strip():
+        query = query.filter(UserModel.status == effective_status.strip().upper())
+    if search and search.lower() != "undefined" and search.strip():
+        clean_search = search.strip()
         query = query.filter(
-            (UserModel.full_name.ilike(f"%{search}%")) |
-            (UserModel.employee_id.ilike(f"%{search}%")) |
-            (UserModel.official_email.ilike(f"%{search}%"))
+            (UserModel.full_name.ilike(f"%{clean_search}%")) |
+            (UserModel.employee_id.ilike(f"%{clean_search}%")) |
+            (UserModel.official_email.ilike(f"%{clean_search}%"))
         )
 
     users = query.order_by(UserModel.created_at.desc()).all()
@@ -279,6 +283,110 @@ def update_user_status(
     )
 
     return {"status": "success", "message": f"User {target_user.employee_id} status updated to {new_status}."}
+
+
+@router.post("/users/{user_id}/approve")
+def approve_user(
+    user_id: str,
+    request: Request,
+    current_user: UserModel = Depends(require_permission(Permissions.USER_UPDATE)),
+    db: Session = Depends(get_db)
+):
+    """
+    Formally approves a pending officer registration.
+    Statutory authority is restricted to System Administrators and Superintendents of Police (SP).
+    """
+    if not current_user.role or current_user.role.name not in (Roles.SYSTEM_ADMIN, Roles.SUPERINTENDENT):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Statutory approval requires System Administrator or Superintendent (SP) clearance."
+        )
+
+    target_user = db.query(UserModel).filter_by(id=user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Officer account not found.")
+
+    if target_user.status == "ACTIVE":
+        return {"status": "success", "message": f"Officer {target_user.employee_id} is already active."}
+
+    prev_status = target_user.status
+    target_user.status = "ACTIVE"
+    target_user.deactivated_at = None
+    target_user.locked_until = None
+    target_user.failed_login_count = 0
+    db.commit()
+
+    record_audit_event(
+        action=AuditAction.USER_ENABLED,
+        result="SUCCESS",
+        user_id=current_user.id,
+        actor=current_user.official_email,
+        role=current_user.role.name if current_user.role else None,
+        details={
+            "approved_officer_id": target_user.id,
+            "approved_employee_id": target_user.employee_id,
+            "approved_email": target_user.official_email,
+            "previous_status": prev_status,
+            "action": "OFFICER_COMMISSION_APPROVED"
+        },
+        ip_address=get_client_ip(request),
+        db=db
+    )
+
+    return {
+        "status": "success",
+        "message": f"Officer commission for {target_user.full_name} ({target_user.employee_id}) approved successfully."
+    }
+
+
+@router.post("/users/{user_id}/reject")
+def reject_user(
+    user_id: str,
+    request: Request,
+    current_user: UserModel = Depends(require_permission(Permissions.USER_UPDATE)),
+    db: Session = Depends(get_db)
+):
+    """
+    Rejects a pending officer registration.
+    Statutory authority is restricted to System Administrators and Superintendents of Police (SP).
+    """
+    if not current_user.role or current_user.role.name not in (Roles.SYSTEM_ADMIN, Roles.SUPERINTENDENT):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Statutory approval requires System Administrator or Superintendent (SP) clearance."
+        )
+
+    target_user = db.query(UserModel).filter_by(id=user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Officer account not found.")
+
+    prev_status = target_user.status
+    target_user.status = "REJECTED"
+    target_user.deactivated_at = utcnow()
+    revoke_all_user_sessions(db, target_user.id)
+    db.commit()
+
+    record_audit_event(
+        action=AuditAction.USER_DISABLED,
+        result="SUCCESS",
+        user_id=current_user.id,
+        actor=current_user.official_email,
+        role=current_user.role.name if current_user.role else None,
+        details={
+            "rejected_officer_id": target_user.id,
+            "rejected_employee_id": target_user.employee_id,
+            "rejected_email": target_user.official_email,
+            "previous_status": prev_status,
+            "action": "OFFICER_COMMISSION_REJECTED"
+        },
+        ip_address=get_client_ip(request),
+        db=db
+    )
+
+    return {
+        "status": "success",
+        "message": f"Officer commission for {target_user.full_name} ({target_user.employee_id}) has been rejected."
+    }
 
 
 @router.patch("/users/{user_id}/role")

@@ -28,7 +28,7 @@ export const GeoLegend: React.FC<GeoLegendProps> = ({
   setShowHeatmap,
 }) => {
   return (
-    <div className="bg-[#0b101b]/90 border border-border/80 rounded-lg p-3 backdrop-blur-md shadow-xl text-xs space-y-2.5 max-w-xs select-none">
+    <div className="bg-card/95 border border-border/80 rounded-xl p-3 backdrop-blur-md shadow-xl text-xs space-y-2.5 max-w-xs select-none">
       <div className="flex items-center justify-between pb-1.5 border-b border-border/60">
         <div className="flex items-center gap-1.5 font-bold text-foreground text-[11px] uppercase tracking-wider">
           <Layers className="w-3.5 h-3.5 text-primary" />

@@ -5,21 +5,13 @@ import {
 } from 'lucide-react';
 import { StorylineSequence, StorylineStep, apiClient } from '../../services/apiClient';
 import { useTimelineStore } from '../../store/useTimelineStore';
+import { getDomainTheme, formatINR } from './timelineAdapters';
 import { cn } from '../../utils/cn';
 
 interface StorylinePanelProps {
   caseId?: string;
   onSelectEvent?: (eventId: string) => void;
 }
-
-const DOMAIN_ICONS: Record<string, any> = {
-  TELECOM: Smartphone,
-  FINANCIAL: CreditCard,
-  SOCIAL: MessagesSquare,
-  LOCATION: MapPin,
-  NETWORK: Globe,
-  ANALYTICAL: AlertTriangle
-};
 
 export const TimelineStorylinePanel: React.FC<StorylinePanelProps> = ({
   caseId,
@@ -51,8 +43,9 @@ export const TimelineStorylinePanel: React.FC<StorylinePanelProps> = ({
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center p-12 text-muted-foreground text-xs animate-pulse">
-        Synthesizing multi-domain temporal storylines...
+      <div className="flex-1 flex flex-col items-center justify-center p-12 text-center text-muted-foreground text-xs space-y-2">
+        <div className="w-8 h-8 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
+        <span>Synthesizing multi-domain temporal storylines...</span>
       </div>
     );
   }
@@ -62,7 +55,7 @@ export const TimelineStorylinePanel: React.FC<StorylinePanelProps> = ({
       <div className="flex-1 flex flex-col items-center justify-center p-12 text-center text-muted-foreground">
         <Sparkles className="w-8 h-8 text-primary/40 mb-3" />
         <h4 className="text-sm font-bold text-foreground">No Storylines Reconstructed Yet</h4>
-        <p className="text-xs max-w-md mt-1">
+        <p className="text-xs max-w-md mt-1 text-muted-foreground">
           Storylines are generated when tightly coupled multi-domain temporal correlations (calls, transfers, location movements) are identified.
         </p>
       </div>
@@ -70,10 +63,32 @@ export const TimelineStorylinePanel: React.FC<StorylinePanelProps> = ({
   }
 
   return (
-    <div className="flex-1 flex h-full overflow-hidden bg-background">
-      {/* Storyline Master List Sidebar */}
-      <div className="w-80 flex-shrink-0 border-r border-border bg-card/40 flex flex-col h-full">
-        <div className="px-4 py-3 border-b border-border">
+    <div className="flex-1 flex flex-col md:flex-row h-full overflow-hidden bg-background select-none">
+      {/* Mobile Episode Selector Strip (md:hidden) */}
+      <div className="md:hidden border-b border-border bg-card/90 p-2.5 flex items-center gap-2 overflow-x-auto scrollbar-hide touch-scroll flex-shrink-0">
+        <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground pl-1 pr-2 border-r border-border/60 flex-shrink-0">
+          <Sparkles className="w-3.5 h-3.5 text-primary" />
+          <span>Episodes</span>
+        </div>
+        {storylines.map((story) => (
+          <button
+            key={story.sequence_id}
+            onClick={() => setSelectedStoryId(story.sequence_id)}
+            className={cn(
+              "flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all whitespace-nowrap",
+              story.sequence_id === selectedStoryId
+                ? "bg-primary text-primary-foreground border-primary shadow-xs"
+                : "bg-secondary/60 text-muted-foreground border-border hover:text-foreground"
+            )}
+          >
+            {story.title}
+          </button>
+        ))}
+      </div>
+
+      {/* Storyline Master List Sidebar (Desktop) */}
+      <div className="hidden md:flex w-80 flex-shrink-0 border-r border-border bg-card/40 flex-col h-full">
+        <div className="px-4 py-3 border-b border-border bg-card">
           <h3 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
             <Sparkles className="w-3.5 h-3.5 text-primary" />
             <span>Reconstructed Episodes ({storylines.length})</span>
@@ -90,7 +105,7 @@ export const TimelineStorylinePanel: React.FC<StorylinePanelProps> = ({
                 className={cn(
                   "w-full text-left p-3 rounded-lg border transition-all shadow-xs",
                   isSelected
-                    ? "bg-primary/10 border-primary text-primary shadow-sm"
+                    ? "bg-primary/10 border-primary text-primary shadow-sm font-medium"
                     : "bg-card hover:bg-secondary/40 border-border text-foreground"
                 )}
               >
@@ -101,7 +116,7 @@ export const TimelineStorylinePanel: React.FC<StorylinePanelProps> = ({
                 <p className="text-[11px] text-muted-foreground line-clamp-2">{story.summary}</p>
                 <div className="flex items-center gap-2 mt-2 pt-2 border-t border-border/40 text-[10px] text-muted-foreground">
                   <span className="bg-secondary px-1.5 py-0.5 rounded font-mono">{story.steps.length} steps</span>
-                  <span className="bg-secondary px-1.5 py-0.5 rounded font-mono">{story.domain_span.join(', ')}</span>
+                  <span className="bg-secondary px-1.5 py-0.5 rounded font-mono truncate">{story.domain_span.join(', ')}</span>
                 </div>
               </button>
             );
@@ -111,13 +126,13 @@ export const TimelineStorylinePanel: React.FC<StorylinePanelProps> = ({
 
       {/* Storyline Detail Flow */}
       {activeStory && (
-        <div className="flex-1 flex flex-col h-full overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 flex flex-col h-full overflow-y-auto p-3 sm:p-6 space-y-4 sm:space-y-6">
           {/* Header Card */}
-          <div className="bg-card border border-border rounded-xl p-5 shadow-sm space-y-3">
-            <div className="flex items-center justify-between">
+          <div className="bg-card border border-border rounded-xl p-3.5 sm:p-5 shadow-sm space-y-3">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
               <div>
                 <span className="text-[10px] font-mono font-bold uppercase text-primary tracking-wider">{activeStory.category}</span>
-                <h2 className="text-lg font-bold text-foreground mt-0.5">{activeStory.title}</h2>
+                <h2 className="text-base sm:text-lg font-bold text-foreground mt-0.5">{activeStory.title}</h2>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-mono bg-secondary border border-border px-2.5 py-1 rounded-md text-foreground">
@@ -141,7 +156,8 @@ export const TimelineStorylinePanel: React.FC<StorylinePanelProps> = ({
           {/* Sequential Step Cards with Delta Connectors */}
           <div className="max-w-2xl mx-auto w-full space-y-2 relative pb-12">
             {activeStory.steps.map((step, idx) => {
-              const Icon = DOMAIN_ICONS[step.domain] || DOMAIN_ICONS.ANALYTICAL;
+              const domainCfg = getDomainTheme(step.domain);
+              const Icon = domainCfg.icon;
 
               return (
                 <React.Fragment key={step.step_index}>
@@ -168,8 +184,8 @@ export const TimelineStorylinePanel: React.FC<StorylinePanelProps> = ({
                   >
                     <div className="flex items-center justify-between gap-2 mb-2">
                       <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-md bg-secondary border border-border flex items-center justify-center">
-                          <Icon className="w-3.5 h-3.5 text-primary" />
+                        <div className={cn("w-6 h-6 rounded-md border flex items-center justify-center", domainCfg.bg, domainCfg.border)}>
+                          <Icon className={cn("w-3.5 h-3.5", domainCfg.color)} />
                         </div>
                         <span className="text-xs font-bold text-foreground uppercase tracking-wider">{step.event_type}</span>
                         {step.is_anomaly && (
@@ -189,6 +205,11 @@ export const TimelineStorylinePanel: React.FC<StorylinePanelProps> = ({
 
                     <div className="flex flex-wrap items-center justify-between text-xs gap-2 pt-2 border-t border-border/40 text-muted-foreground">
                       <div className="flex items-center gap-2">
+                        {step.amount_inr && step.amount_inr > 0 && (
+                          <span className="font-mono text-emerald-400 font-bold">
+                            {formatINR(step.amount_inr)}
+                          </span>
+                        )}
                         {step.location && (
                           <span className="flex items-center gap-1 text-amber-400">
                             <MapPin className="w-3 h-3" /> {step.location}
@@ -196,7 +217,7 @@ export const TimelineStorylinePanel: React.FC<StorylinePanelProps> = ({
                         )}
                       </div>
                       <span className="text-[10px] font-mono text-primary group-hover:underline flex items-center gap-1">
-                        <span>Event Details</span>
+                        <span>Inspect Evidence Dossier</span>
                         <ExternalLink className="w-3 h-3" />
                       </span>
                     </div>
@@ -210,3 +231,4 @@ export const TimelineStorylinePanel: React.FC<StorylinePanelProps> = ({
     </div>
   );
 };
+export default TimelineStorylinePanel;

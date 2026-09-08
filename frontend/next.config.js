@@ -9,9 +9,16 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
-  experimental: {
-    allowedDevOrigins: ['10.221.163.37', 'localhost:3000', '10.221.163.37:3000'],
-  },
+  allowedDevOrigins: [
+    'localhost:3000',
+    '127.0.0.1:3000',
+    '172.31.92.13',
+    '172.31.92.13:3000',
+    '10.55.162.185',
+    '10.55.162.185:3000',
+    '10.221.163.37',
+    '10.221.163.37:3000',
+  ],
   async rewrites() {
     return [
       {

@@ -124,6 +124,85 @@ def run_gds_analytics(gds: GraphDataScience, G) -> Dict[str, Any]:
 
     return {"status": "All 5 GDS Analytics executed successfully", "details": results}
 
+def run_networkx_analytics(session, case_id: Any = None) -> Dict[str, Any]:
+    """
+    High-performance NetworkX fallback engine when Neo4j GDS plugin is not available.
+    Computes Louvain community detection, PageRank, and Betweenness Centrality,
+    then updates Neo4j nodes with communityId, pagerank, and betweenness.
+    """
+    import networkx as nx
+    
+    # 1. Fetch nodes
+    node_query = """
+    MATCH (e) WHERE NOT e:Anomaly 
+      AND ($cid IS NULL OR e.case_id = $cid OR $cid IN coalesce(e.case_ids, []))
+    RETURN elementId(e) AS id, coalesce(e.name, e.primary_name, e.number, e.account_number, e.address, e.id) AS label
+    """
+    nodes = session.run(node_query, {"cid": case_id}).data()
+    if not nodes:
+        return {"status": "empty", "nodes": 0}
+        
+    # 2. Fetch edges
+    rel_query = """
+    MATCH (e1)-[r]-(e2)
+    WHERE NOT e1:Anomaly AND NOT e2:Anomaly AND elementId(e1) < elementId(e2)
+      AND ($cid IS NULL OR e1.case_id = $cid OR $cid IN coalesce(e1.case_ids, []))
+      AND ($cid IS NULL OR e2.case_id = $cid OR $cid IN coalesce(e2.case_ids, []))
+    RETURN elementId(e1) AS src, elementId(e2) AS tgt, count(r) AS weight
+    """
+    rels = session.run(rel_query, {"cid": case_id}).data()
+    
+    G = nx.Graph()
+    for n in nodes:
+        G.add_node(n["id"], label=n.get("label"))
+    for r in rels:
+        G.add_edge(r["src"], r["tgt"], weight=float(r["weight"]))
+        
+    # 3. Community detection (Louvain with fallback to connected components)
+    try:
+        communities = list(nx.community.louvain_communities(G, seed=42))
+    except Exception:
+        communities = list(nx.connected_components(G))
+        
+    # 4. PageRank & Betweenness
+    try:
+        pr = nx.pagerank(G, weight="weight" if rels else None)
+    except Exception:
+        pr = {n: 1.0 / len(G) for n in G.nodes()}
+        
+    try:
+        bw = nx.betweenness_centrality(G, weight="weight" if rels else None)
+    except Exception:
+        bw = {n: 0.0 for n in G.nodes()}
+        
+    # 5. Batch write back to Neo4j
+    updates = []
+    for comm_idx, comm in enumerate(communities, start=1):
+        for node_id in comm:
+            updates.append({
+                "id": node_id,
+                "communityId": comm_idx,
+                "pagerank": round(pr.get(node_id, 0.0), 4),
+                "betweenness": round(bw.get(node_id, 0.0), 4)
+            })
+            
+    if updates:
+        session.run("""
+            UNWIND $updates AS u
+            MATCH (e) WHERE elementId(e) = u.id
+            SET e.communityId = u.communityId,
+                e.pagerank = u.pagerank,
+                e.betweenness = u.betweenness
+        """, {"updates": updates})
+        
+    return {
+        "status": "completed",
+        "engine": "networkx",
+        "nodes": len(nodes),
+        "relationships": len(rels),
+        "communities": len(communities)
+    }
+
 def generate_logical_community_metadata(session, cid: int, case_id: Any = None) -> Dict[str, Any]:
     """
     Dynamically generates a professional, logical name and operational profile
@@ -178,25 +257,22 @@ def generate_logical_community_metadata(session, cid: int, case_id: Any = None) 
                 if a and isinstance(a, str):
                     locations.append(a.strip())
         if len(sorted_people) > 1:
-            broker_cand = sorted(sorted_people[1:], key=lambda p: p.get("betweenness", 0.0), reverse=True)
-            broker = broker_cand[0].get("name") or broker_cand[0].get("primary_name") or "Key Associate"
-        elif phones:
-            broker = phones[0].get("number", "Phone Gateway")
-    else:
-        if accounts:
-            kingpin = accounts[0].get("holder") or accounts[0].get("account_number") or "Account Nexus"
-        elif phones:
-            kingpin = phones[0].get("number") or "Telecom Nexus"
-            
-    crime_tags = []
-    if len(accounts) >= 2:
-        crime_tags.append("Money Mule & Hawala Ring")
-    if len(phones) >= 2 or len(towers) >= 1:
-        crime_tags.append("Extortion & Telecom Conduit")
-    if len(ips) >= 1:
-        crime_tags.append("Cyber Intrusion Cell")
+            sorted_by_bw = sorted(sorted_people[1:], key=lambda p: p.get("betweenness", 0.0), reverse=True)
+            broker = sorted_by_bw[0].get("name") or sorted_by_bw[0].get("primary_name") or "Operational Broker"
+    elif accounts:
+        kingpin = f"Account {accounts[0].get('account_number', 'Target')}"
+    elif phones:
+        kingpin = f"Subscriber {phones[0].get('number', 'Target')}"
         
-    crime_tag = " & ".join(crime_tags[:2]) if crime_tags else "Operational Nexus"
+    crime_signatures = []
+    if len(accounts) > 1:
+        crime_signatures.append("Money Mule & Hawala Ring")
+    if len(phones) > 1 or len(towers) > 1:
+        crime_signatures.append("Extortion & Telecom Conduit")
+    if len(ips) > 0:
+        crime_signatures.append("Cyber Intrusion Cell")
+        
+    crime_tag = " & ".join(crime_signatures) if crime_signatures else "Organized Criminal Nexus"
     loc_str = locations[0] if locations else "Investigation Zone"
     
     if kingpin != "Unknown" and "Syndicate" not in kingpin and "Nexus" not in kingpin:
@@ -307,49 +383,57 @@ def extract_community_subgraph(session, community_id: int, case_id: Any = None) 
     payload = base_res["payload"] if base_res else {"group_id": community_id, "offenders": []}
     
     # 2. FastRP / KNN Similar Behavior (Exposing Hidden Shadows / Silent Partners)
-    knn_q = """
-    MATCH (n1), (n2)
-    WHERE (n1.communityId = $cid OR n2.communityId = $cid)
-      AND elementId(n1) < elementId(n2)
-      AND n1.fastrp_embedding IS NOT NULL
-      AND n2.fastrp_embedding IS NOT NULL
-      AND NOT n1:Anomaly AND NOT n2:Anomaly
-    WITH n1, n2, gds.similarity.cosine(n1.fastrp_embedding, n2.fastrp_embedding) AS similarity
-    WHERE similarity > 0.65
-    RETURN coalesce(n1.name, n1.account_number, n1.number, n1.handle, n1.address, elementId(n1)) AS entity_1,
-           coalesce(n2.name, n2.account_number, n2.number, n2.handle, n2.address, elementId(n2)) AS entity_2,
-           round(similarity * 1000) / 1000 AS similarity
-    ORDER BY similarity DESC LIMIT 5
-    """
-    knn_records = [
-        {
-            "entity_1": r["entity_1"],
-            "entity_2": r["entity_2"],
-            "similarity": r["similarity"],
-            "significance": f"High behavioral similarity ({round(r['similarity'] * 100)}%) indicating silent partner or shadow asset."
-        }
-        for r in session.run(knn_q, cid=community_id, case_id=case_id)
-    ]
+    knn_records = []
+    try:
+        knn_q = """
+        MATCH (n1), (n2)
+        WHERE (n1.communityId = $cid OR n2.communityId = $cid)
+          AND elementId(n1) < elementId(n2)
+          AND n1.fastrp_embedding IS NOT NULL
+          AND n2.fastrp_embedding IS NOT NULL
+          AND NOT n1:Anomaly AND NOT n2:Anomaly
+        WITH n1, n2, gds.similarity.cosine(n1.fastrp_embedding, n2.fastrp_embedding) AS similarity
+        WHERE similarity > 0.65
+        RETURN coalesce(n1.name, n1.account_number, n1.number, n1.handle, n1.address, elementId(n1)) AS entity_1,
+               coalesce(n2.name, n2.account_number, n2.number, n2.handle, n2.address, elementId(n2)) AS entity_2,
+               round(similarity * 1000) / 1000 AS similarity
+        ORDER BY similarity DESC LIMIT 5
+        """
+        knn_records = [
+            {
+                "entity_1": r["entity_1"],
+                "entity_2": r["entity_2"],
+                "similarity": r["similarity"],
+                "significance": f"High behavioral similarity ({round(r['similarity'] * 100)}%) indicating silent partner or shadow asset."
+            }
+            for r in session.run(knn_q, cid=community_id, case_id=case_id)
+        ]
+    except Exception:
+        knn_records = []
     
     # 3. Shortest Path (Dijkstra Money Trail)
-    sp_q = """
-    MATCH (source:BankAccount), (target:BankAccount)
-    WHERE source <> target AND (source.communityId = $cid OR target.communityId = $cid)
-    MATCH p = shortestPath((source)-[:TRANSACTED_WITH*..6]-(target))
-    RETURN [n in nodes(p) | coalesce(n.holder, n.account_number, n.name, n.id)] AS trail,
-           [r in relationships(p) | {type: type(r), amount: coalesce(r.amount, 0.0)}] AS hops,
-           length(p) AS length
-    ORDER BY length ASC LIMIT 4
-    """
-    sp_records = [
-        {
-            "trail": r["trail"],
-            "hops": r["hops"],
-            "length": r["length"],
-            "description": f"Multi-hop money trail ({r['length']} transfers) tracing funds across intermediary accounts."
-        }
-        for r in session.run(sp_q, cid=community_id, case_id=case_id)
-    ]
+    sp_records = []
+    try:
+        sp_q = """
+        MATCH (source:BankAccount), (target:BankAccount)
+        WHERE source <> target AND (source.communityId = $cid OR target.communityId = $cid)
+        MATCH p = shortestPath((source)-[:TRANSACTED_WITH*..6]-(target))
+        RETURN [n in nodes(p) | coalesce(n.holder, n.account_number, n.name, n.id)] AS trail,
+               [r in relationships(p) | {type: type(r), amount: coalesce(r.amount, 0.0)}] AS hops,
+               length(p) AS length
+        ORDER BY length ASC LIMIT 4
+        """
+        sp_records = [
+            {
+                "trail": r["trail"],
+                "hops": r["hops"],
+                "length": r["length"],
+                "description": f"Multi-hop money trail ({r['length']} transfers) tracing funds across intermediary accounts."
+            }
+            for r in session.run(sp_q, cid=community_id, case_id=case_id)
+        ]
+    except Exception:
+        sp_records = []
     
     # 4. GDS Louvain Syndicate Summary
     offenders = payload.get("offenders", [])
@@ -489,52 +573,60 @@ def extract_entire_graph_subgraph(session, case_id: Any = None) -> Dict[str, Any
     digital_ipdr = [dict(r) for r in session.run(ip_q, case_id=case_id)]
     
     # 7. Global FastRP & KNN Similar Behavior (Cross-Syndicate Shadows)
-    knn_q = """
-    MATCH (n1), (n2)
-    WHERE elementId(n1) < elementId(n2)
-      AND n1.fastrp_embedding IS NOT NULL
-      AND n2.fastrp_embedding IS NOT NULL
-      AND NOT n1:Anomaly AND NOT n2:Anomaly
-    WITH n1, n2, gds.similarity.cosine(n1.fastrp_embedding, n2.fastrp_embedding) AS similarity
-    WHERE similarity > 0.60
-    RETURN coalesce(n1.name, n1.account_number, n1.number, n1.handle, n1.address, elementId(n1)) AS entity_1,
-           n1.communityId AS comm_1,
-           coalesce(n2.name, n2.account_number, n2.number, n2.handle, n2.address, elementId(n2)) AS entity_2,
-           n2.communityId AS comm_2,
-           round(similarity * 1000) / 1000 AS similarity
-    ORDER BY similarity DESC LIMIT 8
-    """
-    knn_records = [
-        {
-            "entity_1": r["entity_1"],
-            "comm_1": r["comm_1"],
-            "entity_2": r["entity_2"],
-            "comm_2": r["comm_2"],
-            "similarity": r["similarity"],
-            "significance": f"High behavioral similarity ({round(r['similarity'] * 100)}%) across clusters {r['comm_1']} and {r['comm_2']} indicating shared operational cell or silent partner."
-        }
-        for r in session.run(knn_q, case_id=case_id)
-    ]
+    knn_records = []
+    try:
+        knn_q = """
+        MATCH (n1), (n2)
+        WHERE elementId(n1) < elementId(n2)
+          AND n1.fastrp_embedding IS NOT NULL
+          AND n2.fastrp_embedding IS NOT NULL
+          AND NOT n1:Anomaly AND NOT n2:Anomaly
+        WITH n1, n2, gds.similarity.cosine(n1.fastrp_embedding, n2.fastrp_embedding) AS similarity
+        WHERE similarity > 0.60
+        RETURN coalesce(n1.name, n1.account_number, n1.number, n1.handle, n1.address, elementId(n1)) AS entity_1,
+               n1.communityId AS comm_1,
+               coalesce(n2.name, n2.account_number, n2.number, n2.handle, n2.address, elementId(n2)) AS entity_2,
+               n2.communityId AS comm_2,
+               round(similarity * 1000) / 1000 AS similarity
+        ORDER BY similarity DESC LIMIT 8
+        """
+        knn_records = [
+            {
+                "entity_1": r["entity_1"],
+                "comm_1": r["comm_1"],
+                "entity_2": r["entity_2"],
+                "comm_2": r["comm_2"],
+                "similarity": r["similarity"],
+                "significance": f"High behavioral similarity ({round(r['similarity'] * 100)}%) across clusters {r['comm_1']} and {r['comm_2']} indicating shared operational cell or silent partner."
+            }
+            for r in session.run(knn_q, case_id=case_id)
+        ]
+    except Exception:
+        knn_records = []
     
     # 8. Cross-Syndicate Shortest Paths
-    sp_q = """
-    MATCH (source:BankAccount), (target:BankAccount)
-    WHERE source <> target AND source.communityId <> target.communityId
-    MATCH p = shortestPath((source)-[:TRANSACTED_WITH*..8]-(target))
-    RETURN [n in nodes(p) | coalesce(n.holder, n.account_number, n.name, n.id)] AS trail,
-           [r in relationships(p) | {type: type(r), amount: coalesce(r.amount, 0.0)}] AS hops,
-           length(p) AS length
-    ORDER BY length ASC LIMIT 4
-    """
-    sp_records = [
-        {
-            "trail": r["trail"],
-            "hops": r["hops"],
-            "length": r["length"],
-            "description": f"Cross-syndicate money trail ({r['length']} transfers) bridging distinct criminal cells."
-        }
-        for r in session.run(sp_q, case_id=case_id)
-    ]
+    sp_records = []
+    try:
+        sp_q = """
+        MATCH (source:BankAccount), (target:BankAccount)
+        WHERE source <> target AND source.communityId <> target.communityId
+        MATCH p = shortestPath((source)-[:TRANSACTED_WITH*..8]-(target))
+        RETURN [n in nodes(p) | coalesce(n.holder, n.account_number, n.name, n.id)] AS trail,
+               [r in relationships(p) | {type: type(r), amount: coalesce(r.amount, 0.0)}] AS hops,
+               length(p) AS length
+        ORDER BY length ASC LIMIT 4
+        """
+        sp_records = [
+            {
+                "trail": r["trail"],
+                "hops": r["hops"],
+                "length": r["length"],
+                "description": f"Cross-syndicate money trail ({r['length']} transfers) bridging distinct criminal cells."
+            }
+            for r in session.run(sp_q, case_id=case_id)
+        ]
+    except Exception:
+        sp_records = []
     
     # Sort top actors
     ranked_pr = sorted(all_nodes, key=lambda x: x.get("pagerank", 0.0), reverse=True)

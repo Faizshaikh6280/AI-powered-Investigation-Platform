@@ -79,6 +79,15 @@ class InviteAcceptRequest(BaseModel):
     token: str
     password: str
 
+class RegisterRequest(BaseModel):
+    employee_id: str
+    full_name: str
+    official_email: str
+    password: str
+    role_name: Optional[str] = "SUB_INSPECTOR"
+    unit_id: Optional[str] = None
+    phone_number: Optional[str] = None
+
 
 @router.post("/login")
 def login(
@@ -161,6 +170,9 @@ def login(
 
     # 4. Check Account Status
     if user.status != "ACTIVE":
+        detail_msg = f"Account is currently {user.status.lower()}. Please contact your system administrator."
+        if user.status == "PENDING_APPROVAL":
+            detail_msg = "Account registration is pending statutory approval by the System Administrator or Superintendent of Police (SP). Please wait for approval before signing in."
         record_audit_event(
             action=AuditAction.ACCESS_DENIED,
             result="DENIED",
@@ -175,7 +187,7 @@ def login(
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Account is currently {user.status.lower()}. Please contact your system administrator."
+            detail=detail_msg
         )
 
     # 5. Verify Password
@@ -262,6 +274,100 @@ def login(
         },
         "permissions": list(get_user_permissions(db, user)),
         "case_memberships": [{"case_id": m.case_id, "case_role": m.case_role} for m in memberships]
+    }
+
+
+@router.post("/register")
+def register_officer(
+    payload: RegisterRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db)
+):
+    """
+    Registers a new officer account directly from the UI.
+    Validates credentials, creates user with status ACTIVE, and creates an authenticated session.
+    """
+    client_ip = get_client_ip(request)
+    user_agent = request.headers.get("User-Agent")
+    email_clean = payload.official_email.lower().strip()
+    emp_clean = payload.employee_id.upper().strip()
+
+    if not email_clean or not emp_clean or not payload.full_name.strip():
+        raise HTTPException(status_code=400, detail="Employee ID, Full Name, and Official Email are required.")
+
+    # 1. Check for duplicates
+    existing_user = (
+        db.query(UserModel)
+        .filter((UserModel.official_email == email_clean) | (UserModel.employee_id == emp_clean))
+        .first()
+    )
+    if existing_user:
+        raise HTTPException(
+            status_code=400,
+            detail=f"An officer with this email or employee ID already exists ({existing_user.employee_id})."
+        )
+
+    # 2. Validate password complexity
+    valid, reason = validate_password_complexity(payload.password)
+    if not valid:
+        raise HTTPException(status_code=400, detail=reason)
+
+    # 3. Resolve Role
+    target_role_name = (payload.role_name or "SUB_INSPECTOR").strip().upper()
+    role = db.query(RoleModel).filter_by(name=target_role_name).first()
+    if not role:
+        role = db.query(RoleModel).filter_by(name="SUB_INSPECTOR").first()
+    if not role:
+        role = db.query(RoleModel).first()
+
+    # 4. Resolve Unit & Organization
+    unit = None
+    if payload.unit_id:
+        unit = db.query(UnitModel).filter_by(id=payload.unit_id).first()
+    if not unit:
+        unit = db.query(UnitModel).first()
+    org_id = unit.organization_id if unit else None
+
+    # 5. Create user in PENDING_APPROVAL status (requires Admin/SP approval)
+    user = UserModel(
+        employee_id=emp_clean,
+        full_name=payload.full_name.strip(),
+        official_email=email_clean,
+        phone_number=payload.phone_number.strip() if payload.phone_number else None,
+        password_hash=hash_password(payload.password),
+        role_id=role.id if role else None,
+        organization_id=org_id,
+        unit_id=unit.id if unit else None,
+        status="PENDING_APPROVAL",
+        mfa_enabled=False
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    record_audit_event(
+        action=AuditAction.USER_CREATED,
+        result="SUCCESS",
+        user_id=user.id,
+        actor=user.official_email,
+        role=user.role.name if user.role else None,
+        organization_id=user.organization_id,
+        unit_id=user.unit_id,
+        ip_address=client_ip,
+        user_agent=user_agent,
+        details={"self_registered": True, "badge": emp_clean, "status": "PENDING_APPROVAL"},
+        db=db
+    )
+
+    return {
+        "status": "PENDING_APPROVAL",
+        "mfa_required": False,
+        "message": "Officer registration submitted successfully. Your account is pending statutory approval by the System Administrator or Superintendent of Police (SP). Once approved, you will be able to log in with your credentials.",
+        "employee_id": emp_clean,
+        "full_name": user.full_name,
+        "official_email": user.official_email,
+        "role_display": role.display_name if role else "Investigator"
     }
 
 
@@ -641,6 +747,36 @@ def confirm_password_reset(
     return {"status": "success", "message": "Password has been reset successfully. Please sign in."}
 
 
+@router.get("/invite/verify")
+def verify_invitation(token: str, db: Session = Depends(get_db)):
+    """Verifies validity of an invitation token and returns officer commissioning preview details."""
+    token_clean = token.strip()
+    token_hash = hashlib.sha256(token_clean.encode("utf-8")).hexdigest()
+    invite = db.query(InvitationModel).filter_by(token_hash=token_hash).first()
+
+    if not invite:
+        raise HTTPException(status_code=404, detail="Invitation token was not found.")
+    if invite.status == "ACCEPTED":
+        raise HTTPException(status_code=400, detail="This invitation has already been accepted. Please sign in.")
+    if invite.status != "PENDING" or invite.expires_at < utcnow():
+        raise HTTPException(status_code=400, detail="This invitation link has expired or has been revoked.")
+
+    role = db.query(RoleModel).filter_by(id=invite.role_id).first()
+    unit = db.query(UnitModel).filter_by(id=invite.unit_id).first() if invite.unit_id else None
+
+    return {
+        "valid": True,
+        "invitation_id": invite.id,
+        "official_email": invite.official_email,
+        "employee_id": invite.employee_id,
+        "full_name": invite.full_name,
+        "role_name": role.name if role else "INSPECTOR",
+        "role_display": role.display_name if role else "Investigator",
+        "unit_name": unit.name if unit else "Special Operations Wing",
+        "expires_at": invite.expires_at.isoformat()
+    }
+
+
 @router.post("/invite/accept")
 def accept_invitation(
     payload: InviteAcceptRequest,
@@ -699,17 +835,24 @@ def accept_invitation(
     )
 
     return {
-        "status": "success",
-        "message": "Account activated successfully.",
+        "status": "AUTHENTICATED",
+        "mfa_required": False,
+        "message": "Account activated successfully. Welcome to TRACE Platform.",
         "user": {
             "id": user.id,
             "employee_id": user.employee_id,
             "full_name": user.full_name,
+            "email": user.official_email,
             "official_email": user.official_email,
             "role": user.role.name if user.role else None,
+            "role_display": user.role.display_name if user.role else None,
+            "unit": user.unit.name if user.unit else None,
+            "unit_code": user.unit.code if user.unit else None,
             "status": user.status,
             "mfa_enabled": user.mfa_enabled
-        }
+        },
+        "permissions": list(get_user_permissions(db, user)),
+        "case_memberships": []
     }
 
 

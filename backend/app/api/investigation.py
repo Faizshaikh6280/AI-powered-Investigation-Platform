@@ -22,7 +22,7 @@ from app.core.database import get_db
 from app.core.neo4j_client import neo4j_client
 from app.services.gds_engine import (
     get_gds_client, project_and_compute_association_strength,
-    run_gds_analytics, extract_community_subgraph,
+    run_gds_analytics, run_networkx_analytics, extract_community_subgraph,
     extract_entire_graph_subgraph,
     generate_logical_community_metadata
 )
@@ -50,7 +50,7 @@ def run_algorithms(
     payload: Optional[dict] = None,
     current_user: Optional[UserModel] = Depends(get_current_user)
 ):
-    """Executes all 5 GDS algorithms and returns enriched communities with logical names, kingpins, and brokers scoped to case."""
+    """Executes all 5 GDS / NetworkX algorithms and returns enriched communities with logical names, kingpins, and brokers scoped to case."""
     target_case_id = (payload.get("case_id") if payload and isinstance(payload, dict) else None) or case_id
     
     if target_case_id:
@@ -60,7 +60,7 @@ def run_algorithms(
                 {"cid": target_case_id}
             ).single()
             cnt = chk["cnt"] if chk else 0
-            if cnt == 0:
+            if cnt <= 3:
                 try:
                     from app.services.graph_sync import sync_mongo_to_neo4j
                     sync_mongo_to_neo4j(case_id=target_case_id)
@@ -79,17 +79,20 @@ def run_algorithms(
                     "message": f"No graph entities found for case {target_case_id}. Please upload evidence and execute the processing pipeline."
                 }
 
+    res = {"status": "skipped"}
     try:
         gds = get_gds_client()
         graph_name = f"criminal_network_{target_case_id}" if target_case_id else "criminal_network"
-        res = {"status": "skipped"}
+        if not gds.graph.exists(graph_name)["exists"]:
+            project_and_compute_association_strength(gds, graph_name, case_id=target_case_id)
+        G = gds.graph.get(graph_name)
+        res = run_gds_analytics(gds, G)
+    except Exception as gds_err:
         try:
-            if not gds.graph.exists(graph_name)["exists"]:
-                project_and_compute_association_strength(gds, graph_name, case_id=target_case_id)
-            G = gds.graph.get(graph_name)
-            res = run_gds_analytics(gds, G)
-        except Exception as gds_err:
-            res = {"status": "fallback", "message": str(gds_err)}
+            with neo4j_client.driver.session() as session:
+                res = run_networkx_analytics(session, case_id=target_case_id)
+        except Exception as nx_err:
+            res = {"status": "fallback", "message": f"GDS: {gds_err}, NX: {nx_err}"}
             with neo4j_client.driver.session() as session:
                 session.run("""
                     MATCH (e) WHERE NOT e:Anomaly AND ($cid IS NULL OR e.case_id = $cid OR $cid IN coalesce(e.case_ids, []))
@@ -97,7 +100,8 @@ def run_algorithms(
                         e.pagerank = coalesce(e.pagerank, 1.0),
                         e.betweenness = coalesce(e.betweenness, 0.0)
                 """, {"cid": target_case_id})
-        
+    
+    try:
         query = """
         MATCH (e)
         WHERE e.communityId IS NOT NULL AND NOT e:Anomaly
@@ -112,7 +116,9 @@ def run_algorithms(
             
         return {"status": "success", "communities": communities, "analytics_status": res}
     except Exception as e:
-        return {"status": "success", "communities": []}
+        import traceback
+        traceback.print_exc()
+        return {"status": "error", "message": str(e), "communities": []}
 
 @router.get("/community/{community_id}/extract")
 def extract_community(

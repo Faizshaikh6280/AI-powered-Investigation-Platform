@@ -81,6 +81,7 @@ export default function NFCEvidenceScannerModal({
   const [allowDuplicate, setAllowDuplicate] = useState<boolean>(true);
   const [customCardUid, setCustomCardUid] = useState<string>('04:A1:B2:C3:D4:E5:80');
   const [customRecordText, setCustomRecordText] = useState<string>('Arjun Mehta\n+919810011223\nhttps://dark-broker.onion');
+  const [directInputText, setDirectInputText] = useState<string>('Arjun Mehta\n+919810011223\nhttps://secure-vault.iron-lotus.in/node-04');
 
   // Web NFC abort controller
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -225,9 +226,18 @@ export default function NFCEvidenceScannerModal({
           if (event.message && event.message.records) {
             for (const r of event.message.records) {
               let textData = '';
+              let dataBytesHex = '';
               if (r.data) {
-                const decoder = new TextDecoder(r.encoding || 'utf-8');
-                textData = decoder.decode(r.data);
+                try {
+                  const decoder = new TextDecoder(r.encoding || 'utf-8', { fatal: false });
+                  textData = decoder.decode(r.data);
+                } catch (decErr) {
+                  console.warn('TextDecoder error:', decErr);
+                }
+                try {
+                  const bytes = new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength);
+                  dataBytesHex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+                } catch {}
               }
               records.push({
                 record_type: r.recordType || 'text',
@@ -235,6 +245,7 @@ export default function NFCEvidenceScannerModal({
                 encoding: r.encoding || 'utf-8',
                 lang: r.lang || 'en',
                 data_text: textData,
+                data_bytes_hex: dataBytesHex || undefined,
               });
             }
           }
@@ -310,7 +321,12 @@ export default function NFCEvidenceScannerModal({
       }
     } catch (apiErr: any) {
       setScannerState('ERROR');
-      setErrorMessage(apiErr.message || 'Acquisition pipeline failed.');
+      const rawMsg = apiErr.message || 'Acquisition pipeline failed.';
+      if (rawMsg.includes('Failed to fetch') || rawMsg.includes('NetworkError')) {
+        setErrorMessage('Network connection lost (Failed to fetch). Please verify your mobile device is connected to the same Wi-Fi network as the workstation.');
+      } else {
+        setErrorMessage(rawMsg);
+      }
     }
   };
 
@@ -366,7 +382,7 @@ export default function NFCEvidenceScannerModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-background/80 backdrop-blur-md overflow-y-auto">
       <div className="relative w-full max-w-5xl bg-card border border-border rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Top Header Bar */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/40">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 sm:px-6 py-3 sm:py-4 border-b border-border bg-muted/40">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-cyan-500/10 text-cyan-500 rounded-xl border border-cyan-500/20">
               <Radio className="w-5 h-5 animate-pulse" />
@@ -378,13 +394,13 @@ export default function NFCEvidenceScannerModal({
                 </span>
                 <span className="text-xs text-muted-foreground">• Physical Evidence Acquisition</span>
               </div>
-              <h2 className="text-lg font-bold text-foreground">Forensic Crime Scene NFC Evidence Acquisition</h2>
+              <h2 className="text-base sm:text-lg font-bold text-foreground">Forensic Crime Scene NFC Evidence Acquisition</h2>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             {/* Modal Navigation Tabs */}
-            <div className="flex bg-muted/80 p-1 rounded-lg border border-border text-xs">
+            <div className="flex bg-muted/80 p-1 rounded-lg border border-border text-xs overflow-x-auto scrollbar-hide touch-scroll">
               <button
                 onClick={() => setModalTab('SCANNER')}
                 className={cn(
@@ -436,7 +452,7 @@ export default function NFCEvidenceScannerModal({
         </div>
 
         {/* Modal Body */}
-        <div className="p-6 overflow-y-auto flex-1 space-y-6">
+        <div className="p-3 sm:p-6 overflow-y-auto flex-1 space-y-6">
           
           {/* ========================================================================= */}
           {/* TAB 1: LIVE SCANNER */}
@@ -444,7 +460,7 @@ export default function NFCEvidenceScannerModal({
           {modalTab === 'SCANNER' && (
             <div className="space-y-6">
               {/* Radar Scan Visualizer Box */}
-              <div className="relative border border-border bg-gradient-to-b from-card to-muted/20 rounded-2xl p-8 flex flex-col items-center justify-center min-h-[300px] overflow-hidden">
+              <div className="relative border border-border bg-gradient-to-b from-card to-muted/20 rounded-2xl p-4 sm:p-8 flex flex-col items-center justify-center min-h-[240px] sm:min-h-[300px] overflow-hidden">
                 {/* Background Radar Waves */}
                 {scannerState === 'WAITING_FOR_CARD' && (
                   <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -492,18 +508,66 @@ export default function NFCEvidenceScannerModal({
 
                   {/* Unsupported Banner CTA */}
                   {scannerState === 'UNSUPPORTED' && (
-                    <div className="bg-muted p-4 rounded-xl border border-border text-left space-y-3 w-full">
-                      <div className="flex items-start gap-2.5 text-xs text-muted-foreground">
-                        <HelpCircle className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
-                        <span>
-                          Standard desktop browsers do not expose physical Web NFC hardware (which requires an Android Chrome device with NFC antenna).
-                        </span>
+                    <div className="bg-card p-4 rounded-xl border border-border text-left space-y-4 w-full">
+                      {/* Security Origin Warning for Mobile Chrome */}
+                      {typeof window !== 'undefined' && !window.isSecureContext && (
+                        <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs space-y-2">
+                          <div className="flex items-center gap-1.5 font-bold text-amber-400 text-xs">
+                            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                            <span>Android Chrome Security Sandbox: HTTP Origin Detected</span>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground leading-relaxed">
+                            Google Chrome disables hardware Web NFC antennas over plain HTTP on LAN IPs (<code className="text-foreground font-mono">http://10.55.162.185:3000</code>).
+                          </p>
+                          <div className="font-mono text-[11px] text-muted-foreground space-y-1 bg-black/40 p-2.5 rounded-lg border border-border/60">
+                            <div className="text-foreground font-semibold">10-Second Chrome Fix for Native Physical Card Tap:</div>
+                            <div>1. Open new tab in Chrome: <span className="text-primary select-all font-semibold">chrome://flags/#unsafely-treat-insecure-origin-as-secure</span></div>
+                            <div>2. Set dropdown to: <strong className="text-emerald-400">Enabled</strong></div>
+                            <div>3. Enter: <span className="text-cyan-400 select-all font-semibold">{typeof window !== 'undefined' ? window.location.origin : 'http://10.55.162.185:3000'}</span></div>
+                            <div>4. Tap blue <strong className="text-emerald-400">Relaunch</strong> button at bottom.</div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Direct Card Ingestion (No Flags or HTTPS Required) */}
+                      <div className="p-3.5 bg-secondary/30 rounded-xl border border-border/80 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
+                            <Cpu className="w-3.5 h-3.5 text-primary" /> Direct Card Data Ingestion (Instant)
+                          </span>
+                          <span className="text-[10px] text-muted-foreground font-mono">Zero Config</span>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground">
+                          Enter or paste the text / vCard payload written on Card 2 to run the full forensic ingestion pipeline:
+                        </p>
+                        <textarea
+                          rows={3}
+                          value={directInputText}
+                          onChange={(e) => setDirectInputText(e.target.value)}
+                          className="w-full bg-background border border-border rounded-lg p-2.5 text-xs font-mono text-foreground outline-none focus:border-primary"
+                          placeholder="Card sectors payload..."
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            executeAcquisitionPipeline({
+                              serial_number: customCardUid,
+                              card_uid: customCardUid,
+                              records: [{ record_type: 'text', data_text: directInputText }]
+                            });
+                          }}
+                          className="w-full py-2 bg-primary text-primary-foreground font-semibold text-xs rounded-lg hover:bg-primary/90 transition-colors flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+                        >
+                          <Radio className="w-3.5 h-3.5" /> Acquire & Correlate Physical Evidence
+                        </button>
                       </div>
+
+                      {/* Hardware Lab Simulator Button */}
                       <button
                         onClick={() => setModalTab('SIMULATOR')}
-                        className="w-full py-2.5 bg-primary text-primary-foreground font-medium text-xs rounded-lg hover:bg-primary/90 transition-colors flex items-center justify-center gap-2 shadow-sm"
+                        className="w-full py-2.5 bg-secondary hover:bg-secondary/80 text-foreground font-medium text-xs rounded-xl border border-border transition-colors flex items-center justify-center gap-2 cursor-pointer"
                       >
-                        <Sliders className="w-4 h-4" />
+                        <Sliders className="w-4 h-4 text-primary" />
                         Open Hardware Lab / Simulate 5 Benchmark Crime Scene Cards
                       </button>
                     </div>
@@ -539,7 +603,7 @@ export default function NFCEvidenceScannerModal({
               </div>
 
               {/* Progress Steps Indicator */}
-              <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
                 {[
                   { step: 1, label: '1. Detect', states: ['CARD_DETECTED', 'READING', 'HASHING', 'STORED', 'ANALYZING', 'COMPLETE'] },
                   { step: 2, label: '2. NDEF Read', states: ['READING', 'HASHING', 'STORED', 'ANALYZING', 'COMPLETE'] },
@@ -825,7 +889,7 @@ export default function NFCEvidenceScannerModal({
                   <strong className="mx-1 underline">Probabilistic Entity Matches</strong>, and
                   <strong className="mx-1 underline">Investigative Inferences</strong>.
                 </p>
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 pt-1 text-[11px]">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-1 text-[11px]">
                   <div className="bg-background/80 p-2 rounded border border-amber-500/20">
                     <div className="font-bold text-foreground">1. Observed Fact</div>
                     <div className="text-muted-foreground mt-0.5">Physical card recovered at scene contains verifiable bytes.</div>
@@ -846,11 +910,11 @@ export default function NFCEvidenceScannerModal({
               </div>
 
               {/* Dossier Tabs */}
-              <div className="flex border-b border-border text-xs">
+              <div className="flex border-b border-border text-xs overflow-x-auto scrollbar-hide touch-scroll">
                 <button
                   onClick={() => setDossierTab('OVERVIEW')}
                   className={cn(
-                    "px-4 py-2 font-medium border-b-2 transition-colors",
+                    "px-4 py-2 font-medium border-b-2 transition-colors whitespace-nowrap",
                     dossierTab === 'OVERVIEW' 
                       ? "border-primary text-primary" 
                       : "border-transparent text-muted-foreground hover:text-foreground"
@@ -861,7 +925,7 @@ export default function NFCEvidenceScannerModal({
                 <button
                   onClick={() => setDossierTab('IDENTIFIERS')}
                   className={cn(
-                    "px-4 py-2 font-medium border-b-2 transition-colors flex items-center gap-1.5",
+                    "px-4 py-2 font-medium border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap",
                     dossierTab === 'IDENTIFIERS' 
                       ? "border-primary text-primary" 
                       : "border-transparent text-muted-foreground hover:text-foreground"
@@ -872,7 +936,7 @@ export default function NFCEvidenceScannerModal({
                 <button
                   onClick={() => setDossierTab('ER')}
                   className={cn(
-                    "px-4 py-2 font-medium border-b-2 transition-colors flex items-center gap-1.5",
+                    "px-4 py-2 font-medium border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap",
                     dossierTab === 'ER' 
                       ? "border-primary text-primary" 
                       : "border-transparent text-muted-foreground hover:text-foreground"
@@ -883,7 +947,7 @@ export default function NFCEvidenceScannerModal({
                 <button
                   onClick={() => setDossierTab('CORRELATIONS')}
                   className={cn(
-                    "px-4 py-2 font-medium border-b-2 transition-colors flex items-center gap-1.5",
+                    "px-4 py-2 font-medium border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap",
                     dossierTab === 'CORRELATIONS' 
                       ? "border-primary text-primary" 
                       : "border-transparent text-muted-foreground hover:text-foreground"
@@ -928,8 +992,8 @@ export default function NFCEvidenceScannerModal({
               {/* Sub-Tab 2: Derived Identifiers */}
               {dossierTab === 'IDENTIFIERS' && (
                 <div className="space-y-3">
-                  <div className="border border-border rounded-xl overflow-hidden">
-                    <table className="w-full text-left text-xs">
+                  <div className="border border-border rounded-xl overflow-hidden overflow-x-auto touch-scroll">
+                    <table className="w-full text-left text-xs min-w-[580px]">
                       <thead className="bg-muted/60 text-muted-foreground uppercase text-[10px] font-bold border-b border-border">
                         <tr>
                           <th className="px-4 py-2.5">Field</th>
@@ -1084,7 +1148,7 @@ export default function NFCEvidenceScannerModal({
               {/* Sub-Tab 4: Multi-Domain Case Correlation */}
               {dossierTab === 'CORRELATIONS' && (
                 <div className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                     {/* Telecom CDR */}
                     <div className="p-4 bg-card border border-border rounded-xl space-y-1.5">
                       <div className="flex items-center gap-2 text-indigo-500">

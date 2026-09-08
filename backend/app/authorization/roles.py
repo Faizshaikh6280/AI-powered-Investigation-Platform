@@ -3,7 +3,7 @@ Canonical Role Definitions and Default Permission Mappings for the Investigation
 """
 
 from typing import Dict, List, Set
-from app.authorization.permissions import Permissions
+from app.authorization.permissions import Permissions, ALL_PERMISSIONS
 
 class Roles:
     SYSTEM_ADMIN = "SYSTEM_ADMIN"
@@ -18,24 +18,9 @@ class Roles:
 ROLE_DEFINITIONS: Dict[str, Dict[str, any]] = {
     Roles.SYSTEM_ADMIN: {
         "display_name": "System Administrator",
-        "description": "Manages users, roles, units, and security administration. Cannot alter raw evidence.",
+        "description": "Enterprise administrator with universal access across users, security, case dossiers, and forensic analytics.",
         "is_system_role": True,
-        "permissions": [
-            Permissions.USER_CREATE,
-            Permissions.USER_VIEW,
-            Permissions.USER_UPDATE,
-            Permissions.USER_DISABLE,
-            Permissions.ROLE_VIEW,
-            Permissions.ROLE_MANAGE,
-            Permissions.AUDIT_VIEW,
-            Permissions.AUDIT_EXPORT,
-            Permissions.SESSION_VIEW,
-            Permissions.SESSION_REVOKE,
-            Permissions.CASE_READ,
-            Permissions.CASE_DELETE,
-            Permissions.EVIDENCE_VIEW,
-            Permissions.EVIDENCE_NFC_ACQUIRE,
-        ]
+        "permissions": sorted(list(ALL_PERMISSIONS))
     },
     Roles.SUPERINTENDENT: {
         "display_name": "Superintendent of Police (SP)",
@@ -71,6 +56,8 @@ ROLE_DEFINITIONS: Dict[str, Dict[str, any]] = {
             Permissions.REPORT_EXPORT,
             Permissions.AUDIT_VIEW,
             Permissions.USER_VIEW,
+            Permissions.USER_CREATE,
+            Permissions.USER_UPDATE,
         ]
     },
     Roles.IPS_OFFICER: {

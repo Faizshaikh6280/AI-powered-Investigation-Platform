@@ -403,7 +403,7 @@ def verify_evidence_integrity(
     is_valid = storage_service.verify_integrity(ev.storage_path, ev.sha256)
 
     record_audit_event(
-        action=AuditAction.EVIDENCE_VERIFIED,
+        action=AuditAction.INTEGRITY_VERIFIED,
         result="SUCCESS" if is_valid else "FAILURE",
         user_id=current_user.id,
         actor=current_user.official_email,
@@ -422,6 +422,176 @@ def verify_evidence_integrity(
         "verified": is_valid,
         "integrity_status": "VERIFIED_AUTHENTIC" if is_valid else "TAMPERED_OR_CORRUPT"
     }
+
+
+@router.get("/evidence/{evidence_id}")
+def get_evidence_detail(
+    evidence_id: str,
+    request: Request,
+    current_user: UserModel = Depends(require_permission(Permissions.EVIDENCE_VIEW)),
+    db: Session = Depends(get_db)
+):
+    """Retrieve evidence dossier item metadata. Audited with EVIDENCE_VIEWED."""
+    ev = db.query(EvidenceModel).filter_by(evidence_id=evidence_id).first()
+    if not ev:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+
+    role_name = current_user.role.name if current_user.role else ""
+    if role_name not in (Roles.SYSTEM_ADMIN, Roles.SUPERINTENDENT, Roles.AUDITOR):
+        is_member = db.query(CaseMemberModel).filter_by(
+            case_id=ev.case_id, user_id=current_user.id, active=True
+        ).first()
+        if not is_member and role_name != Roles.IPS_OFFICER:
+            raise HTTPException(status_code=403, detail=f"Access denied: Not assigned to case {ev.case_id}")
+
+    record_audit_event(
+        action=AuditAction.EVIDENCE_VIEWED,
+        result="SUCCESS",
+        user_id=current_user.id,
+        actor=current_user.official_email,
+        role=role_name,
+        case_id=ev.case_id,
+        evidence_id=evidence_id,
+        resource_type="evidence",
+        resource_id=evidence_id,
+        details={"filename": ev.original_filename, "sha256": ev.sha256},
+        ip_address=get_client_ip(request),
+        db=db
+    )
+
+    return {
+        "evidence_id": ev.evidence_id,
+        "case_id": ev.case_id,
+        "filename": ev.original_filename,
+        "mime_type": ev.mime_type,
+        "file_size": ev.file_size,
+        "sha256": ev.sha256,
+        "sensitivity": ev.sensitivity,
+        "status": ev.processing_status,
+        "detected_source_type": ev.detected_source_type,
+        "record_count": ev.record_count,
+        "quality_score": ev.quality_score,
+        "received_at": ev.received_at.isoformat() if ev.received_at else None,
+        "storage_path": ev.storage_path
+    }
+
+
+@router.get("/evidence/{evidence_id}/download")
+def download_evidence(
+    evidence_id: str,
+    request: Request,
+    current_user: UserModel = Depends(require_permission(Permissions.EVIDENCE_DOWNLOAD)),
+    db: Session = Depends(get_db)
+):
+    """
+    Forensic raw evidence download:
+    Retrieves encrypted object from MinIO and decrypts in memory for the authorized investigator.
+    High-risk action: strictly audited with EVIDENCE_DOWNLOADED.
+    """
+    ev = db.query(EvidenceModel).filter_by(evidence_id=evidence_id).first()
+    if not ev:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+
+    role_name = current_user.role.name if current_user.role else ""
+    if role_name not in (Roles.SYSTEM_ADMIN, Roles.SUPERINTENDENT, Roles.AUDITOR):
+        is_member = db.query(CaseMemberModel).filter_by(
+            case_id=ev.case_id, user_id=current_user.id, active=True
+        ).first()
+        if not is_member and role_name != Roles.IPS_OFFICER:
+            raise HTTPException(status_code=403, detail=f"Access denied: Not assigned to case {ev.case_id}")
+
+    try:
+        decrypted_bytes = storage_service.get_decrypted_evidence(ev.storage_path)
+    except Exception as e:
+        logger.error(f"Failed to decrypt evidence {evidence_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve and decrypt evidence file.")
+
+    record_audit_event(
+        action=AuditAction.EVIDENCE_DOWNLOADED,
+        result="SUCCESS",
+        user_id=current_user.id,
+        actor=current_user.official_email,
+        role=role_name,
+        case_id=ev.case_id,
+        evidence_id=evidence_id,
+        resource_type="evidence",
+        resource_id=evidence_id,
+        details={
+            "filename": ev.original_filename,
+            "sha256": ev.sha256,
+            "bytes_downloaded": len(decrypted_bytes)
+        },
+        ip_address=get_client_ip(request),
+        db=db
+    )
+
+    media_type = ev.mime_type or "application/octet-stream"
+    return Response(
+        content=decrypted_bytes,
+        media_type=media_type,
+        headers={"Content-Disposition": f"attachment; filename=\"{ev.original_filename}\""}
+    )
+
+
+@router.get("/evidence/{evidence_id}/export")
+def export_evidence(
+    evidence_id: str,
+    request: Request,
+    current_user: UserModel = Depends(require_permission(Permissions.EVIDENCE_EXPORT)),
+    db: Session = Depends(get_db)
+):
+    """
+    Forensic evidence export:
+    Exports processed evidence metadata, chain of custody checksums, and record counts.
+    High-risk action: strictly audited with EVIDENCE_EXPORTED.
+    """
+    ev = db.query(EvidenceModel).filter_by(evidence_id=evidence_id).first()
+    if not ev:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+
+    role_name = current_user.role.name if current_user.role else ""
+    if role_name not in (Roles.SYSTEM_ADMIN, Roles.SUPERINTENDENT, Roles.AUDITOR):
+        is_member = db.query(CaseMemberModel).filter_by(
+            case_id=ev.case_id, user_id=current_user.id, active=True
+        ).first()
+        if not is_member and role_name != Roles.IPS_OFFICER:
+            raise HTTPException(status_code=403, detail=f"Access denied: Not assigned to case {ev.case_id}")
+
+    export_data = {
+        "evidence_id": ev.evidence_id,
+        "case_id": ev.case_id,
+        "original_filename": ev.original_filename,
+        "sha256": ev.sha256,
+        "mime_type": ev.mime_type,
+        "file_size": ev.file_size,
+        "detected_source_type": ev.detected_source_type,
+        "processing_status": ev.processing_status,
+        "record_count": ev.record_count,
+        "valid_record_count": ev.valid_record_count,
+        "duplicate_record_count": ev.duplicate_record_count,
+        "quality_score": ev.quality_score,
+        "storage_path": ev.storage_path,
+        "received_at": ev.received_at.isoformat() if ev.received_at else None,
+        "exported_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "exported_by": current_user.official_email
+    }
+
+    record_audit_event(
+        action=AuditAction.EVIDENCE_EXPORTED,
+        result="SUCCESS",
+        user_id=current_user.id,
+        actor=current_user.official_email,
+        role=role_name,
+        case_id=ev.case_id,
+        evidence_id=evidence_id,
+        resource_type="evidence",
+        resource_id=evidence_id,
+        details={"filename": ev.original_filename, "sha256": ev.sha256},
+        ip_address=get_client_ip(request),
+        db=db
+    )
+
+    return export_data
 
 @router.delete("/{case_id}")
 def delete_case(

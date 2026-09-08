@@ -66,8 +66,8 @@
   * {
     @apply border-border;
   }
-  body {
-    @apply bg-background text-foreground font-sans antialiased overflow-hidden transition-colors duration-300;
+  html, body {
+    @apply h-full min-h-[100dvh] bg-background text-foreground font-sans antialiased transition-colors duration-300;
   }
 }
 
@@ -82,6 +82,18 @@
   
   .cyber-button {
     @apply bg-primary hover:bg-primary/90 text-primary-foreground transition-colors;
+  }
+
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  .touch-scroll {
+    -webkit-overflow-scrolling: touch;
   }
 }
 
@@ -137,4 +149,24 @@
     @apply bg-indigo-500/20 text-indigo-400 border border-indigo-500/30;
   }
 }
+
+@keyframes radar-pulse-anim {
+  0% {
+    transform: translate(-50%, -50%) scale(0.6);
+    opacity: 0.9;
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.4);
+    opacity: 0.35;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(2.2);
+    opacity: 0;
+  }
+}
+
+.radar-pulse-ring {
+  animation: radar-pulse-anim 2.5s cubic-bezier(0.2, 0.6, 0.35, 1) infinite;
+}
+
 

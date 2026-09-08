@@ -168,24 +168,24 @@ export default function ProcessingPipelineView({ onNavigateToTab }: ProcessingPi
   };
 
   return (
-    <div className="flex flex-col h-full bg-background p-6 md:p-8 max-w-7xl mx-auto w-full overflow-y-auto">
+    <div className="flex flex-col h-full bg-background p-3 sm:p-6 md:p-8 max-w-7xl mx-auto w-full overflow-y-auto">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8 border-b border-border pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 sm:mb-8 border-b border-border pb-4">
         <div>
-          <h2 className="text-2xl font-bold text-foreground flex items-center gap-2">
+          <h2 className="text-xl sm:text-2xl font-bold text-foreground flex items-center gap-2">
             <Cpu className="w-6 h-6 text-primary" />
             Distributed Intelligence Pipeline
           </h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
+          <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
             Monitor and trigger the end-to-end analytical processing stages for case <span className="font-mono text-foreground font-bold">{activeCase?.case_reference || 'ACTIVE'}</span>.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 w-full sm:w-auto">
           <button
             onClick={handleRunFullPipeline}
             disabled={isRunningPipeline}
-            className="px-5 py-2.5 bg-primary text-primary-foreground text-sm font-bold rounded-lg hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
+            className="w-full sm:w-auto justify-center px-4 sm:px-5 py-2.5 bg-primary text-primary-foreground text-xs sm:text-sm font-bold rounded-lg hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer"
           >
             {isRunningPipeline ? (
               <>
@@ -203,7 +203,7 @@ export default function ProcessingPipelineView({ onNavigateToTab }: ProcessingPi
       </div>
 
       {/* Stage Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-8">
         {stages.map((stage) => {
           const status = stageStatuses[stage.index];
           const isCurrent = activeStageIndex === stage.index;
@@ -212,7 +212,7 @@ export default function ProcessingPipelineView({ onNavigateToTab }: ProcessingPi
             <div
               key={stage.index}
               className={cn(
-                "bg-card border rounded-xl p-6 flex flex-col justify-between transition-all shadow-sm relative",
+                "bg-card border rounded-xl p-4 sm:p-6 flex flex-col justify-between transition-all shadow-sm relative",
                 isCurrent ? "border-primary ring-2 ring-primary/50" : "border-border"
               )}
             >

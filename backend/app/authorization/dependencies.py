@@ -54,14 +54,7 @@ def get_current_user(
         return system_user
 
     if not raw_token:
-        # Default fallback to active IPS Lead Investigator in development / local environment
-        # to ensure unhindered investigation workflow from UI
-        lead_user = db.query(UserModel).filter_by(employee_id="EMP-IPS-002").first()
-        if not lead_user:
-            lead_user = db.query(UserModel).filter_by(employee_id="EMP-ADMIN-001").first()
-        if not lead_user:
-            lead_user = db.query(UserModel).first()
-        return lead_user
+        return None
 
     return validate_session(db, raw_token)
 
@@ -84,6 +77,9 @@ def require_authenticated_user(
     return user
 
 
+from app.core.middleware import get_request_audit_context
+from app.audit.audit_service import record_audit_event, AuditAction, AuditResult, AuditDecision, AuditReasonCode
+
 def require_permission(permission: str) -> Callable:
     """Dependency factory requiring a specific fine-grained permission."""
     def _dependency(
@@ -93,18 +89,28 @@ def require_permission(permission: str) -> Callable:
     ) -> UserModel:
         decision = authorize(user=user, action=permission, db=db)
         if not decision.allowed:
+            ctx = get_request_audit_context(request)
             record_audit_event(
                 action=AuditAction.POLICY_DENIED,
-                result="DENIED",
+                result=AuditResult.DENIED,
+                decision=AuditDecision.DENIED,
+                reason_code=AuditReasonCode.INVALID_PERMISSION,
+                reason=decision.reason,
                 user_id=user.id,
                 actor=user.official_email,
                 role=user.role.name if user.role else None,
-                reason=decision.reason,
-                ip_address=get_client_ip(request),
-                user_agent=request.headers.get("User-Agent"),
+                organization_id=user.organization_id,
+                unit_id=user.unit_id,
+                resource_type="permission",
+                resource_id=permission,
+                ip_address=ctx.get("ip_address"),
+                user_agent=ctx.get("user_agent"),
+                endpoint=ctx.get("endpoint"),
+                http_method=ctx.get("http_method"),
+                session_id=ctx.get("session_id"),
+                request_id=ctx.get("request_id"),
+                correlation_id=ctx.get("correlation_id"),
                 details={"required_permission": permission},
-                request_id=request.headers.get("X-Request-ID"),
-                correlation_id=request.headers.get("X-Correlation-ID"),
                 db=db
             )
             raise HTTPException(
@@ -136,19 +142,29 @@ def require_case_access(permission: str) -> Callable:
         )
 
         if not decision.allowed:
+            ctx = get_request_audit_context(request)
             record_audit_event(
                 action=AuditAction.ACCESS_DENIED,
-                result="DENIED",
+                result=AuditResult.DENIED,
+                decision=AuditDecision.DENIED,
+                reason_code=AuditReasonCode.CASE_ACCESS_DENIED,
+                reason=decision.reason,
                 user_id=user.id,
                 actor=user.official_email,
                 role=user.role.name if user.role else None,
+                organization_id=user.organization_id,
+                unit_id=user.unit_id,
                 case_id=case_id,
-                reason=decision.reason,
-                ip_address=get_client_ip(request),
-                user_agent=request.headers.get("User-Agent"),
+                resource_type="case",
+                resource_id=case_id,
+                ip_address=ctx.get("ip_address"),
+                user_agent=ctx.get("user_agent"),
+                endpoint=ctx.get("endpoint"),
+                http_method=ctx.get("http_method"),
+                session_id=ctx.get("session_id"),
+                request_id=ctx.get("request_id"),
+                correlation_id=ctx.get("correlation_id"),
                 details={"permission": permission, "case_id": case_id},
-                request_id=request.headers.get("X-Request-ID"),
-                correlation_id=request.headers.get("X-Correlation-ID"),
                 db=db
             )
             raise HTTPException(

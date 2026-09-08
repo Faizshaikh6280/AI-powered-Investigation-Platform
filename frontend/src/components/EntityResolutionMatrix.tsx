@@ -71,20 +71,20 @@ export default function EntityResolutionMatrix({ onViewOnGraph, onNavigateToAnom
   });
 
   return (
-    <div className="flex flex-col h-full bg-background p-6 md:p-8 max-w-7xl mx-auto w-full overflow-y-auto">
+    <div className="flex flex-col h-full bg-background p-3 sm:p-6 md:p-8 max-w-7xl mx-auto w-full overflow-y-auto">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 border-b border-border pb-4">
         <div>
-          <h2 className="text-2xl font-bold text-foreground flex items-center gap-2">
+          <h2 className="text-xl sm:text-2xl font-bold text-foreground flex items-center gap-2">
             <Cpu className="w-6 h-6 text-primary" />
             Zingg ML Entity Resolution Explorer
           </h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
+          <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
             Cross-domain resolved identities, deduplicated clusters, and unified golden profiles from PostgreSQL.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
           <button
             onClick={fetchProfiles}
             disabled={isLoading}
@@ -96,7 +96,7 @@ export default function EntityResolutionMatrix({ onViewOnGraph, onNavigateToAnom
           <button
             onClick={handleRunZingg}
             disabled={isExecutingER}
-            className="px-4 py-2 bg-primary text-primary-foreground text-sm font-bold rounded-lg hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
+            className="px-3.5 sm:px-4 py-2 bg-primary text-primary-foreground text-xs sm:text-sm font-bold rounded-lg hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
           >
             {isExecutingER ? <Loader2 className="w-4 h-4 animate-spin" /> : <Cpu className="w-4 h-4" />}
             Re-run Zingg ER
@@ -113,13 +113,13 @@ export default function EntityResolutionMatrix({ onViewOnGraph, onNavigateToAnom
 
       {/* Filters & Search */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-        <div className="flex gap-2 border-b border-border sm:border-none pb-2 sm:pb-0">
+        <div className="flex gap-2 border-b border-border sm:border-none pb-2 sm:pb-0 overflow-x-auto scrollbar-hide touch-scroll">
           {['All', 'Phones', 'Accounts', 'Social'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveFilter(tab)}
               className={cn(
-                "px-3.5 py-1.5 text-xs font-bold rounded-lg transition-colors",
+                "px-3.5 py-1.5 text-xs font-bold rounded-lg transition-colors shrink-0",
                 activeFilter === tab 
                   ? "bg-primary text-primary-foreground shadow-sm" 
                   : "text-muted-foreground hover:text-foreground hover:bg-secondary"
@@ -130,14 +130,14 @@ export default function EntityResolutionMatrix({ onViewOnGraph, onNavigateToAnom
           ))}
         </div>
 
-        <div className="relative">
+        <div className="relative w-full sm:w-auto">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
             type="text"
             placeholder="Search by name, cluster ID, phone, account, or alias..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-9 pr-4 py-1.5 w-80 bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary text-foreground"
+            className="pl-9 pr-4 py-2 sm:py-1.5 w-full sm:w-80 bg-secondary border border-border rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-primary text-foreground"
           />
         </div>
       </div>
@@ -155,8 +155,8 @@ export default function EntityResolutionMatrix({ onViewOnGraph, onNavigateToAnom
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+          <div className="overflow-x-auto touch-scroll">
+            <table className="w-full min-w-[650px] text-left border-collapse">
               <thead>
                 <tr className="border-b border-border bg-secondary/50 text-xs font-bold text-muted-foreground uppercase tracking-wider">
                   <th className="px-6 py-3.5">Resolved Golden Entity</th>

@@ -32,8 +32,8 @@ export const VerificationDialog: React.FC<Props> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-card border border-border rounded-2xl w-full max-w-md shadow-2xl p-6 space-y-5 text-foreground">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-card border border-border rounded-2xl w-full max-w-md max-h-[92vh] sm:max-h-[85vh] overflow-y-auto shadow-2xl p-4 sm:p-6 space-y-4 sm:space-y-5 text-foreground">
         {/* Header */}
         <div className="flex items-start justify-between border-b border-border pb-3">
           <div className="flex items-center gap-2.5">

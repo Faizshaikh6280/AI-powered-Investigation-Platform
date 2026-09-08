@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { 
   ShieldCheck, Smartphone, Lock, AlertCircle, CheckCircle2, 
-  Loader2, RefreshCw, KeyRound, ArrowRight, ShieldAlert, Sparkles, User
+  Loader2, RefreshCw, KeyRound, ArrowRight, ShieldAlert, Sparkles, User, Radio, Scan
 } from 'lucide-react';
 import { apiClient, UserProfile } from '../../services/apiClient';
 
@@ -91,6 +91,10 @@ function NFCLoginContent() {
   const [pinDigits, setPinDigits] = useState<string[]>(['', '', '', '']);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successData, setSuccessData] = useState<{ user: UserProfile; target_case_id: string | null } | null>(null);
+  const [isWebNfcSupported, setIsWebNfcSupported] = useState<boolean>(false);
+  const [isNfcScanning, setIsNfcScanning] = useState<boolean>(false);
+  const [manualTokenInput, setManualTokenInput] = useState<string>('');
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const pinInputRefs = [
     useRef<HTMLInputElement>(null),
@@ -107,9 +111,84 @@ function NFCLoginContent() {
     }
   }, [searchParams]);
 
+  // 2. Setup Web NFC Reader for Direct In-Browser Tap
+  useEffect(() => {
+    const hasNfc = typeof window !== 'undefined' && 'NDEFReader' in window;
+    setIsWebNfcSupported(hasNfc);
+
+    if (hasNfc && (statusState === 'IDLE' || statusState === 'ERROR')) {
+      startWebNfcReader();
+    }
+
+    return () => {
+      cleanupNfcReader();
+    };
+  }, [statusState]);
+
+  const cleanupNfcReader = () => {
+    if (abortControllerRef.current) {
+      try {
+        abortControllerRef.current.abort();
+      } catch {}
+      abortControllerRef.current = null;
+    }
+    setIsNfcScanning(false);
+  };
+
+  const startWebNfcReader = async () => {
+    if (typeof window === 'undefined' || !('NDEFReader' in window)) return;
+    cleanupNfcReader();
+
+    try {
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
+      const ndef = new (window as any).NDEFReader();
+      await ndef.scan({ signal: abortController.signal });
+      setIsNfcScanning(true);
+
+      ndef.onreading = (event: any) => {
+        let extractedToken: string | null = null;
+        if (event.message && event.message.records) {
+          for (const r of event.message.records) {
+            let text = '';
+            if (r.data) {
+              const decoder = new TextDecoder(r.encoding || 'utf-8', { fatal: false });
+              text = decoder.decode(r.data).trim();
+            }
+            if (!text) continue;
+            // Case A: Full URL with ?t= or &t=
+            if (text.includes('t=')) {
+              const match = text.match(/[?&]t=([^&\s]+)/) || text.match(/t=([^&\s]+)/);
+              if (match && match[1]) {
+                extractedToken = match[1];
+                break;
+              }
+            }
+            // Case B: Raw token string starting with nfc_c_
+            if (text.startsWith('nfc_c_')) {
+              extractedToken = text;
+              break;
+            }
+          }
+        }
+        if (extractedToken) {
+          handleInitiateToken(extractedToken);
+        }
+      };
+
+      ndef.onreadingerror = () => {
+        setErrorMsg('Error reading physical NFC card. Please hold card flat against the device antenna.');
+      };
+    } catch (err: any) {
+      console.warn('[Web NFC Login] Reader initialization info:', err);
+      setIsNfcScanning(false);
+    }
+  };
+
   const handleInitiateToken = async (token: string) => {
     setStatusState('INITIATING');
     setErrorMsg(null);
+    cleanupNfcReader();
 
     // Scrub token from address bar immediately to prevent history/referer leakage
     if (typeof window !== 'undefined') {
@@ -192,19 +271,19 @@ function NFCLoginContent() {
   };
 
   return (
-    <div className="min-h-screen w-full bg-background flex flex-col items-center justify-center p-4 relative overflow-hidden">
+    <div className="min-h-screen w-full bg-background flex flex-col items-center justify-center py-6 px-3 sm:px-4 relative overflow-y-auto">
       {/* Background Cyber Grid Accent */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f293708_1px,transparent_1px),linear-gradient(to_bottom,#1f293708_1px,transparent_1px)] bg-[size:4rem_4rem] pointer-events-none" />
       <div className="absolute top-1/4 -left-32 w-96 h-96 bg-primary/10 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute bottom-1/4 -right-32 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
 
       {/* Main Container */}
-      <div className="relative w-full max-w-md bg-card/90 border border-border/80 rounded-2xl shadow-2xl overflow-hidden backdrop-blur-xl animate-in fade-in duration-300">
+      <div className="relative w-full max-w-md bg-card/90 border border-border/80 rounded-2xl shadow-2xl overflow-hidden backdrop-blur-xl animate-in fade-in duration-300 my-auto">
         
         {/* Glowing Top Border */}
         <div className="h-1.5 w-full bg-gradient-to-r from-cyan-500 via-primary to-indigo-500" />
 
-        <div className="p-6 md:p-8">
+        <div className="p-4 sm:p-6 md:p-8">
           {/* Header */}
           <div className="flex flex-col items-center text-center mb-6">
             <div className="relative mb-4">
@@ -260,7 +339,7 @@ function NFCLoginContent() {
               </div>
 
               {/* 4 Digit Input Boxes */}
-              <div className="flex justify-center gap-3">
+              <div className="flex justify-center gap-2 sm:gap-3">
                 {pinDigits.map((digit, idx) => (
                   <input
                     key={idx}
@@ -272,7 +351,7 @@ function NFCLoginContent() {
                     onChange={(e) => handleDigitChange(idx, e.target.value)}
                     onKeyDown={(e) => handleKeyDown(idx, e)}
                     disabled={statusState === 'VERIFYING_PIN'}
-                    className="w-13 h-14 text-center text-2xl font-mono font-bold bg-secondary/60 border border-border/80 focus:border-primary focus:ring-2 focus:ring-primary/20 rounded-xl outline-none text-foreground transition-all"
+                    className="w-11 sm:w-13 h-12 sm:h-14 text-center text-xl sm:text-2xl font-mono font-bold bg-secondary/60 border border-border/80 focus:border-primary focus:ring-2 focus:ring-primary/20 rounded-xl outline-none text-foreground transition-all"
                   />
                 ))}
               </div>
@@ -335,14 +414,65 @@ function NFCLoginContent() {
           {/* STATE 4: Idle / Awaiting Physical NFC Tap */}
           {(statusState === 'IDLE' || statusState === 'ERROR') && (
             <div className="space-y-6">
-              <div className="p-4 bg-secondary/30 border border-border/70 rounded-xl text-center space-y-2">
+              <div className="p-4 bg-secondary/30 border border-border/70 rounded-xl text-center space-y-3">
                 <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center mx-auto">
                   <Smartphone className="w-5 h-5 animate-pulse" />
                 </div>
-                <h3 className="text-sm font-semibold text-foreground">Tap Physical Police Card</h3>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  Hold your NFC-enabled department card against the back of your Android phone or USB contactless reader.
-                </p>
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Tap Physical Police Card</h3>
+                  <p className="text-xs text-muted-foreground leading-relaxed mt-1">
+                    Hold your NFC-enabled department card against the back of your Android phone or USB contactless reader.
+                  </p>
+                </div>
+
+                {isWebNfcSupported ? (
+                  isNfcScanning ? (
+                    <div className="flex items-center justify-center gap-2 p-2.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-lg text-xs font-semibold animate-pulse">
+                      <Radio className="w-4 h-4" />
+                      <span>Web NFC Antenna Active — Tap Card Now</span>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={startWebNfcReader}
+                      className="w-full py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow-sm transition-colors cursor-pointer"
+                    >
+                      <Radio className="w-3.5 h-3.5" /> Activate Device NFC Receiver
+                    </button>
+                  )
+                ) : (
+                  <div className="text-[11px] text-muted-foreground/80 bg-secondary/40 p-2 rounded-lg border border-border/50">
+                    Desktop browser: Tap card with your NFC phone to launch URL, or use manual verification below.
+                  </div>
+                )}
+
+                {/* Manual Card Token / URL Verification Input */}
+                <div className="pt-2 border-t border-border/50">
+                  <div className="text-[10px] text-muted-foreground text-left mb-1 font-semibold uppercase tracking-wider">
+                    Direct Card Payload Verification:
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="Paste card URL or token (e.g. nfc_c_...)"
+                      value={manualTokenInput}
+                      onChange={(e) => setManualTokenInput(e.target.value)}
+                      className="flex-1 bg-background border border-border text-foreground px-2.5 py-1.5 text-xs rounded-lg font-mono outline-none focus:border-primary placeholder:text-muted-foreground/50"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (manualTokenInput.trim()) {
+                          handleInitiateToken(manualTokenInput.trim());
+                        }
+                      }}
+                      disabled={!manualTokenInput.trim()}
+                      className="px-3 py-1.5 bg-primary text-primary-foreground font-semibold text-xs rounded-lg hover:bg-primary/90 disabled:opacity-40 transition-colors cursor-pointer flex-shrink-0"
+                    >
+                      Verify
+                    </button>
+                  </div>
+                </div>
               </div>
 
               {/* Dev Testing Sandbox (One-Click Tap Simulation) */}

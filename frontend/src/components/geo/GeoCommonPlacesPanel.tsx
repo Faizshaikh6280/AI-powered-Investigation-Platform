@@ -13,7 +13,7 @@ export const GeoCommonPlacesPanel: React.FC<GeoCommonPlacesPanelProps> = ({
   onSelectPlace,
 }) => {
   return (
-    <div className="flex flex-col h-full bg-[#0b101b]/95 border-r border-border/80 text-xs w-96 backdrop-blur-xl">
+    <div className="flex flex-col h-full bg-card border-r border-border/80 text-xs w-96 backdrop-blur-xl">
       {/* Header */}
       <div className="p-3.5 border-b border-border/70 flex items-center justify-between">
         <div className="flex items-center gap-2 font-bold text-foreground text-sm">
@@ -86,7 +86,7 @@ export const GeoCommonPlacesPanel: React.FC<GeoCommonPlacesPanelProps> = ({
                     {Object.entries(place.entity_visit_counts).map(([ent, count]) => (
                       <span
                         key={ent}
-                        className="px-1.5 py-0.5 rounded bg-black/40 border border-border/40 text-[10px] font-mono text-muted-foreground flex items-center gap-1"
+                        className="px-1.5 py-0.5 rounded bg-secondary/80 border border-border/50 text-[10px] font-mono text-muted-foreground flex items-center gap-1"
                       >
                         <span className="text-foreground font-medium truncate max-w-[100px]">{ent}:</span>
                         <span className="text-primary font-bold">{count}</span>

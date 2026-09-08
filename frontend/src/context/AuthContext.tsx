@@ -81,6 +81,15 @@ interface AuthContextType {
   can: (permission: string) => boolean;
   hasCaseAccess: (caseId: string) => boolean;
   login: (identifier: string, password: string) => Promise<AuthStateResponse>;
+  register: (payload: {
+    employee_id: string;
+    full_name: string;
+    official_email: string;
+    password: string;
+    role_name?: string;
+    unit_id?: string;
+    phone_number?: string;
+  }) => Promise<AuthStateResponse>;
   verifyMfa: (challengeToken: string, code: string, isBackupCode?: boolean) => Promise<AuthStateResponse>;
   logout: () => Promise<void>;
   switchDevRole: (roleKey: string) => Promise<void>;
@@ -108,31 +117,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(data.user);
         setPermissions(data.permissions || []);
         setCaseMemberships(data.case_memberships || []);
+        setIsLoading(false);
         return;
       }
     } catch {
-      // Not authenticated yet, fall through to dev login
+      // Not authenticated
     }
 
-    try {
-      const dev = SEEDED_DEV_ACCOUNTS.IPS_OFFICER;
-      const resp = await apiClient.login({ identifier: dev.email, password: dev.defaultPass });
-      if (resp && resp.user) {
-        setUser(resp.user);
-        setPermissions(resp.permissions || []);
-        setCaseMemberships(resp.case_memberships || []);
-      } else {
-        setUser(null);
-        setPermissions([]);
-        setCaseMemberships([]);
-      }
-    } catch {
-      setUser(null);
-      setPermissions([]);
-      setCaseMemberships([]);
-    } finally {
-      setIsLoading(false);
-    }
+    setUser(null);
+    setPermissions([]);
+    setCaseMemberships([]);
+    setIsLoading(false);
   }, []);
 
   useEffect(() => {
@@ -143,6 +138,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
     try {
       const resp = await apiClient.login({ identifier, password });
+      if (resp.status === 'AUTHENTICATED' && resp.user) {
+        setUser(resp.user);
+        setPermissions(resp.permissions || []);
+        setCaseMemberships(resp.case_memberships || []);
+        setIsLoginModalOpen(false);
+      }
+      return resp;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const register = async (payload: {
+    employee_id: string;
+    full_name: string;
+    official_email: string;
+    password: string;
+    role_name?: string;
+    unit_id?: string;
+    phone_number?: string;
+  }): Promise<AuthStateResponse> => {
+    setIsLoading(true);
+    try {
+      const resp = await apiClient.register(payload);
       if (resp.status === 'AUTHENTICATED' && resp.user) {
         setUser(resp.user);
         setPermissions(resp.permissions || []);
@@ -182,6 +201,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setPermissions([]);
       setCaseMemberships([]);
       setIsLoading(false);
+      setIsLoginModalOpen(true);
     }
   };
 
@@ -224,6 +244,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         can,
         hasCaseAccess,
         login,
+        register,
         verifyMfa,
         logout,
         switchDevRole,

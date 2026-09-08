@@ -65,7 +65,7 @@ export const TimelinePlaybackControls: React.FC = () => {
 
   const currentFormatted = currentTime > 0
     ? new Date(currentTime).toISOString().replace('T', ' ').slice(0, 19) + ' UTC'
-    : '--:--:--';
+    : '--:--:-- UTC';
 
   const handleScrubberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const pct = parseFloat(e.target.value);
@@ -74,61 +74,11 @@ export const TimelinePlaybackControls: React.FC = () => {
   };
 
   return (
-    <div className="flex items-center justify-between px-4 py-2 border-t border-border bg-card/90 backdrop-blur-md gap-4 z-20">
-      {/* Play / Step Buttons */}
-      <div className="flex items-center gap-1.5">
-        <button
-          onClick={() => stepBackward()}
-          className="p-1.5 text-muted-foreground hover:text-foreground rounded-md hover:bg-secondary transition-colors"
-          title="Step Backward"
-        >
-          <SkipBack className="w-4 h-4" />
-        </button>
-
-        <button
-          onClick={togglePlay}
-          className={cn(
-            "p-2 rounded-full transition-all shadow-sm flex items-center justify-center",
-            isPlaying
-              ? "bg-amber-500 text-black hover:bg-amber-400"
-              : "bg-primary text-primary-foreground hover:bg-primary/90"
-          )}
-          title={isPlaying ? "Pause Playback" : "Play Chronological Sequence"}
-        >
-          {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
-        </button>
-
-        <button
-          onClick={() => stepForward()}
-          className="p-1.5 text-muted-foreground hover:text-foreground rounded-md hover:bg-secondary transition-colors"
-          title="Step Forward"
-        >
-          <SkipForward className="w-4 h-4" />
-        </button>
-
-        {/* Speed Selector */}
-        <div className="flex items-center gap-1 bg-secondary/80 p-0.5 rounded-md border border-border ml-2">
-          {SPEEDS.map(s => (
-            <button
-              key={s}
-              onClick={() => setPlaybackSpeed(s)}
-              className={cn(
-                "px-1.5 py-0.5 text-[10px] font-mono font-bold rounded transition-colors",
-                playbackSpeed === s
-                  ? "bg-card text-primary shadow-xs border border-border"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              {s}x
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Interactive Time Scrubber Slider */}
-      <div className="flex-1 flex items-center gap-3 max-w-2xl">
-        <span className="text-[10px] font-mono text-muted-foreground">
-          {timeRange[0] > 0 ? new Date(timeRange[0]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '00:00'}
+    <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between px-3 sm:px-4 py-2 border-t border-border bg-card/90 backdrop-blur-md gap-2 sm:gap-4 z-20 select-none">
+      {/* Interactive Time Scrubber Slider (Top on mobile, center on desktop) */}
+      <div className="flex-1 flex items-center gap-2 sm:gap-3 order-1 sm:order-2 max-w-none sm:max-w-2xl">
+        <span className="text-[10px] font-mono text-muted-foreground whitespace-nowrap">
+          {timeRange[0] > 0 ? new Date(timeRange[0]).toISOString().slice(11, 16) : '00:00'}
         </span>
 
         <div className="flex-1 relative flex items-center">
@@ -136,23 +86,88 @@ export const TimelinePlaybackControls: React.FC = () => {
             type="range"
             min="0"
             max="100"
-            step="0.1"
+            step="0.05"
             value={progressPercent}
             onChange={handleScrubberChange}
-            className="w-full h-1.5 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary border border-border focus:outline-none"
+            aria-label="Playback timeline scrubber"
+            className="w-full h-1.5 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary border border-border focus:outline-none focus:ring-1 focus:ring-primary"
           />
         </div>
 
-        <span className="text-[10px] font-mono text-muted-foreground">
-          {timeRange[1] > 0 ? new Date(timeRange[1]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '23:59'}
+        <span className="text-[10px] font-mono text-muted-foreground whitespace-nowrap">
+          {timeRange[1] > 0 ? new Date(timeRange[1]).toISOString().slice(11, 16) : '23:59'}
         </span>
       </div>
 
-      {/* Current Scrubber Timestamp Display */}
-      <div className="flex items-center gap-2 bg-secondary/60 border border-border px-3 py-1 rounded-md">
-        <Clock className="w-3.5 h-3.5 text-primary" />
-        <span className="text-xs font-mono font-bold text-foreground">{currentFormatted}</span>
+      {/* Play / Step Buttons & Speed (Bottom-left on mobile, left on desktop) */}
+      <div className="flex items-center justify-between sm:justify-start gap-1 order-2 sm:order-1">
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => stepBackward()}
+            className="p-1.5 text-muted-foreground hover:text-foreground rounded-md hover:bg-secondary transition-colors"
+            title="Step Backward (60s)"
+            aria-label="Step Backward"
+          >
+            <SkipBack className="w-4 h-4" />
+          </button>
+
+          <button
+            onClick={togglePlay}
+            className={cn(
+              "p-2 rounded-full transition-all shadow-xs flex items-center justify-center",
+              isPlaying
+                ? "bg-amber-500 text-black hover:bg-amber-400"
+                : "bg-primary text-primary-foreground hover:bg-primary/90"
+            )}
+            title={isPlaying ? "Pause Timeline Playback" : "Play Chronological Sequence"}
+            aria-label={isPlaying ? "Pause" : "Play"}
+          >
+            {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
+          </button>
+
+          <button
+            onClick={() => stepForward()}
+            className="p-1.5 text-muted-foreground hover:text-foreground rounded-md hover:bg-secondary transition-colors"
+            title="Step Forward (60s)"
+            aria-label="Step Forward"
+          >
+            <SkipForward className="w-4 h-4" />
+          </button>
+
+          {/* Speed Selector */}
+          <div className="flex items-center gap-0.5 bg-secondary/80 p-0.5 rounded-md border border-border ml-1 sm:ml-2">
+            {SPEEDS.map(s => (
+              <button
+                key={s}
+                onClick={() => setPlaybackSpeed(s)}
+                className={cn(
+                  "px-1.5 sm:px-2 py-0.5 text-[9px] sm:text-[10px] font-mono font-bold rounded transition-colors",
+                  playbackSpeed === s
+                    ? "bg-card text-primary shadow-xs border border-border"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {s}x
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Current Scrubber Timestamp Display (embedded right on mobile) */}
+        <div className="flex sm:hidden items-center gap-1.5 bg-secondary/60 border border-border px-2 py-1 rounded-md shadow-xs">
+          <Clock className="w-3 h-3 text-primary flex-shrink-0" />
+          <span className="text-[10px] font-mono font-bold text-foreground whitespace-nowrap">
+            {currentTime > 0 ? new Date(currentTime).toISOString().replace('T', ' ').slice(11, 19) + ' UTC' : '--:--:-- UTC'}
+          </span>
+        </div>
+      </div>
+
+      {/* Current Scrubber Timestamp Display (Desktop order-3) */}
+      <div className="hidden sm:flex items-center gap-2 bg-secondary/60 border border-border px-3 py-1 rounded-md shadow-xs order-3">
+        <Clock className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+        <span className="text-xs font-mono font-bold text-foreground whitespace-nowrap">{currentFormatted}</span>
       </div>
     </div>
   );
 };
+export default TimelinePlaybackControls;

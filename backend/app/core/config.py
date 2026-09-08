@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")
 
+    # Enterprise Audit & Forensic Trail Configuration
+    AUDIT_ENABLED: bool = os.getenv("AUDIT_ENABLED", "true").lower() in ("true", "1", "yes")
+    AUDIT_RETENTION_DAYS: int = int(os.getenv("AUDIT_RETENTION_DAYS", "365"))
+    AUDIT_METADATA_MAX_SIZE: int = int(os.getenv("AUDIT_METADATA_MAX_SIZE", "32768"))
+    AUDIT_HIGH_RISK_FAIL_POLICY: str = os.getenv("AUDIT_HIGH_RISK_FAIL_POLICY", "FAIL_CLOSED")  # FAIL_CLOSED or RESILIENT
+    AUDIT_INTEGRITY_MODE: str = os.getenv("AUDIT_INTEGRITY_MODE", "HASH_CHAIN")  # HASH_CHAIN, HMAC, or DISABLED
+    AUDIT_ARCHIVAL_ENABLED: bool = os.getenv("AUDIT_ARCHIVAL_ENABLED", "false").lower() in ("true", "1", "yes")
+
     class Config:
         env_file = ".env"
         extra = "ignore"

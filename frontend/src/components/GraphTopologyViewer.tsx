@@ -55,21 +55,29 @@ const getSvgDataUri = (type: string) => {
 };
 
 // Drawer Component
-const Drawer = ({ isOpen, onClose, title, children, width = 'w-96' }: any) => (
-  <div className={cn(
-    "absolute top-0 right-0 bottom-0 bg-background border-l border-border shadow-2xl z-20 transition-transform duration-300 ease-in-out flex flex-col",
-    width, isOpen ? "translate-x-0" : "translate-x-full"
-  )}>
-    <div className="flex items-center justify-between p-4 border-b border-border bg-card sticky top-0 z-10">
-      <h3 className="font-semibold text-foreground flex items-center gap-2">{title}</h3>
-      <button onClick={onClose} className="p-1.5 text-muted-foreground hover:text-foreground rounded-md hover:bg-secondary transition-colors">
-        <X className="w-4 h-4" />
-      </button>
+const Drawer = ({ isOpen, onClose, title, children, width = 'w-full sm:w-96 max-w-full' }: any) => (
+  <>
+    {isOpen && (
+      <div 
+        className="fixed inset-0 bg-black/60 backdrop-blur-xs z-20 sm:hidden animate-in fade-in duration-150"
+        onClick={onClose}
+      />
+    )}
+    <div className={cn(
+      "absolute top-0 right-0 bottom-0 bg-background border-l border-border shadow-2xl z-30 transition-transform duration-300 ease-in-out flex flex-col",
+      width, isOpen ? "translate-x-0" : "translate-x-full"
+    )}>
+      <div className="flex items-center justify-between p-4 border-b border-border bg-card sticky top-0 z-10">
+        <h3 className="font-semibold text-foreground flex items-center gap-2">{title}</h3>
+        <button onClick={onClose} className="p-1.5 text-muted-foreground hover:text-foreground rounded-md hover:bg-secondary transition-colors">
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-0 bg-background">
+        {children}
+      </div>
     </div>
-    <div className="flex-1 overflow-y-auto p-0 bg-background">
-      {children}
-    </div>
-  </div>
+  </>
 );
 
 export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?: string | null }) {
@@ -631,18 +639,18 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
         )}
 
         {/* Floating Top Toolbar */}
-        <div className="absolute top-4 left-4 flex items-center gap-1 p-1.5 bg-card/80 backdrop-blur-md border border-border rounded-xl shadow-lg z-10 transition-all">
-          <div className="relative flex items-center border-r border-border pr-2">
-            <Search className="w-4 h-4 text-muted-foreground absolute left-3" />
+        <div className="absolute top-3 sm:top-4 left-2 sm:left-4 right-2 sm:right-auto max-w-[calc(100vw-1rem)] sm:max-w-none overflow-x-auto scrollbar-hide touch-scroll flex items-center gap-1 p-1 sm:p-1.5 bg-card/90 backdrop-blur-md border border-border rounded-xl shadow-lg z-10 transition-all">
+          <div className="relative flex items-center border-r border-border pr-1.5 sm:pr-2 shrink-0">
+            <Search className="w-3.5 h-3.5 text-muted-foreground absolute left-2.5 sm:left-3" />
             <input 
               type="text" 
-              placeholder="Search entities, IMEI..." 
+              placeholder="Search..." 
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="bg-transparent border-none outline-none text-sm text-foreground pl-9 pr-3 py-1.5 w-48 focus:w-64 transition-all"
+              className="bg-transparent border-none outline-none text-xs sm:text-sm text-foreground pl-8 sm:pl-9 pr-2 sm:pr-3 py-1 sm:py-1.5 w-24 xs:w-36 sm:w-48 focus:w-36 xs:focus:w-48 sm:focus:w-64 transition-all"
             />
             {searchQuery && (
-              <button onClick={() => setSearchQuery('')} className="absolute right-3 text-muted-foreground hover:text-foreground">
+              <button onClick={() => setSearchQuery('')} className="text-muted-foreground hover:text-foreground mr-1">
                 <X className="w-3 h-3" />
               </button>
             )}
@@ -650,49 +658,52 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
           
           <button 
             onClick={() => toggleDrawer('filters')}
-            className={cn("px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 ml-1", 
+            className={cn("px-2.5 sm:px-3 py-1 sm:py-1.5 text-xs sm:text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5 shrink-0", 
               activeDrawer === 'filters' ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary"
             )}
           >
-            <Filter className="w-4 h-4" /> Filters
+            <Filter className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span className="hidden xs:inline">Filters</span>
           </button>
           
           <button 
             onClick={() => toggleDrawer('layout')}
-            className={cn("px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-2", 
+            className={cn("px-2.5 sm:px-3 py-1 sm:py-1.5 text-xs sm:text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5 shrink-0", 
               activeDrawer === 'layout' ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary"
             )}
           >
-            <Layers className="w-4 h-4" /> Layout
+            <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span className="hidden xs:inline">Layout</span>
           </button>
 
           <button 
             onClick={() => setShowEdgeLabels(prev => !prev)}
-            className={cn("px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-2", 
+            className={cn("px-2.5 sm:px-3 py-1 sm:py-1.5 text-xs sm:text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5 shrink-0", 
               showEdgeLabels ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary"
             )}
             title="Toggle Edge Relationship Labels"
           >
-            <Tag className="w-4 h-4" /> Edge Labels
+            <Tag className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span className="hidden sm:inline">Edge Labels</span>
           </button>
 
           <button 
             onClick={handleSyncGraph}
             disabled={isSyncing}
-            className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 transition-colors flex items-center gap-1.5 ml-1 disabled:opacity-50"
+            className="px-2.5 sm:px-3 py-1 sm:py-1.5 text-[11px] sm:text-xs font-semibold rounded-lg bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 transition-colors flex items-center gap-1.5 shrink-0 disabled:opacity-50"
             title="Rebuild & Synchronize Graph with Neo4j and Canonical Events"
           >
             <RefreshCw className={cn("w-3.5 h-3.5", isSyncing && "animate-spin")} />
-            {isSyncing ? "Syncing..." : "Sync Graph"}
+            <span className="hidden sm:inline">{isSyncing ? "Syncing..." : "Sync Graph"}</span>
           </button>
 
           <button 
             onClick={fetchData}
             disabled={loading}
-            className="px-3 py-1.5 text-sm font-medium rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors flex items-center gap-2 border-l border-border ml-1 pl-3 disabled:opacity-50"
+            className="px-2 sm:px-3 py-1 sm:py-1.5 text-xs sm:text-sm font-medium rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors flex items-center gap-1.5 border-l border-border pl-2 sm:pl-3 shrink-0 disabled:opacity-50"
             title="Refresh Data"
           >
-            <RefreshCcw className={cn("w-4 h-4", loading && "animate-spin")} />
+            <RefreshCcw className={cn("w-3.5 h-3.5 sm:w-4 sm:h-4", loading && "animate-spin")} />
           </button>
         </div>
 
@@ -737,11 +748,11 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
         </div>
 
         {/* Cytoscape Container */}
-        <div ref={containerRef} className="absolute inset-0 z-0" />
+        <div ref={containerRef} className="absolute inset-0 z-0 touch-none" />
       </div>
 
       {/* Filter Drawer */}
-      <Drawer isOpen={activeDrawer === 'filters'} onClose={() => setActiveDrawer(null)} title={<><Filter className="w-4 h-4"/> Entity Filters</>} width="w-80">
+      <Drawer isOpen={activeDrawer === 'filters'} onClose={() => setActiveDrawer(null)} title={<><Filter className="w-4 h-4"/> Entity Filters</>} width="w-full sm:w-80 max-w-full">
         <div className="p-5 space-y-6">
           <div>
             <div className="space-y-2">
@@ -784,7 +795,7 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
       </Drawer>
 
       {/* Layout Drawer */}
-      <Drawer isOpen={activeDrawer === 'layout'} onClose={() => setActiveDrawer(null)} title={<><Layers className="w-4 h-4"/> Graph Layout</>} width="w-80">
+      <Drawer isOpen={activeDrawer === 'layout'} onClose={() => setActiveDrawer(null)} title={<><Layers className="w-4 h-4"/> Graph Layout</>} width="w-full sm:w-80 max-w-full">
         <div className="p-5 space-y-3">
           {[
             { id: 'fcose', name: 'Force Directed', desc: 'Prioritizes extreme spacing and natural clusters.' },
@@ -811,7 +822,7 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
       </Drawer>
 
       {/* Node Details Drawer */}
-      <Drawer isOpen={activeDrawer === 'node'} onClose={() => {setActiveDrawer(null); setSelectedNode(null);}} title={<><FileText className="w-4 h-4"/> Entity Profile</>} width="w-96">
+      <Drawer isOpen={activeDrawer === 'node'} onClose={() => {setActiveDrawer(null); setSelectedNode(null);}} title={<><FileText className="w-4 h-4"/> Entity Profile</>} width="w-full sm:w-96 max-w-full">
         {selectedNode ? (
           <div className="flex flex-col h-full">
             <div className="p-6 bg-card border-b border-border shadow-sm z-10 relative">
@@ -907,7 +918,7 @@ export default function GraphTopologyViewer({ focusEntityId }: { focusEntityId?:
       </Drawer>
 
       {/* Edge Details Drawer */}
-      <Drawer isOpen={activeDrawer === 'edge'} onClose={() => {setActiveDrawer(null); setSelectedEdge(null);}} title={<><Share2 className="w-4 h-4"/> Relationship Profile</>} width="w-96">
+      <Drawer isOpen={activeDrawer === 'edge'} onClose={() => {setActiveDrawer(null); setSelectedEdge(null);}} title={<><Share2 className="w-4 h-4"/> Relationship Profile</>} width="w-full sm:w-96 max-w-full">
         {selectedEdge ? (
           <div className="flex flex-col h-full">
             <div className="p-6 bg-card border-b border-border shadow-sm relative z-10">

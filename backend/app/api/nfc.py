@@ -99,8 +99,20 @@ def initiate_nfc_auth(
             detail=f"Too many authentication attempts. Please retry in {retry_after} seconds."
         )
 
-    # 2. Validate token format (must start with nfc_c_ and be safe string)
+    # 2. Validate token format (accepts raw token or full NDEF URL containing ?t= parameter)
     raw_token = payload.credential.strip()
+    if "t=" in raw_token:
+        import urllib.parse
+        try:
+            parsed = urllib.parse.urlparse(raw_token)
+            params = urllib.parse.parse_qs(parsed.query)
+            if "t" in params and params["t"]:
+                raw_token = params["t"][0].strip()
+            else:
+                raw_token = raw_token.split("t=")[-1].split("&")[0].split("#")[0].strip()
+        except Exception:
+            raw_token = raw_token.split("t=")[-1].split("&")[0].split("#")[0].strip()
+
     if not raw_token or not raw_token.startswith("nfc_c_") or len(raw_token) < 20 or len(raw_token) > 128:
         record_audit_event(
             action=AuditAction.NFC_AUTH_FAILED,

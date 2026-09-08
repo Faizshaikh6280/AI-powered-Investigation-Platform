@@ -50,7 +50,7 @@ export default function CreateCaseModal({ isOpen, onClose }: CreateCaseModalProp
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
       <div 
-        className="w-full max-w-lg bg-card border border-border rounded-xl shadow-2xl overflow-hidden"
+        className="w-full max-w-lg bg-card border border-border rounded-xl shadow-2xl overflow-hidden max-h-[92vh] sm:max-h-[85vh] flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between p-5 border-b border-border bg-secondary/30">
@@ -66,7 +66,7 @@ export default function CreateCaseModal({ isOpen, onClose }: CreateCaseModalProp
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
           {error && (
             <div className="p-3 bg-destructive/10 border border-destructive/30 rounded-lg text-sm text-destructive flex items-center gap-2">
               <AlertCircle className="w-4 h-4 flex-shrink-0" />

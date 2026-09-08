@@ -119,7 +119,7 @@ export const TimelineMapPanel: React.FC<MapPanelProps> = ({
   }, [selectedEvent]);
 
   return (
-    <div className="relative w-full h-full bg-[#020617] overflow-hidden">
+    <div className="relative w-full h-full bg-background overflow-hidden">
       <DeckGL
         initialViewState={viewState as any}
         controller={true}

@@ -16,7 +16,7 @@ export const GeoSpatialStoryPanel: React.FC<GeoSpatialStoryPanelProps> = ({
   onSelectCard,
 }) => {
   return (
-    <div className="flex flex-col h-full bg-[#0b101b]/95 border-r border-border/80 text-xs w-96 backdrop-blur-xl">
+    <div className="flex flex-col h-full bg-card border-r border-border/80 text-xs w-96 backdrop-blur-xl">
       {/* Header */}
       <div className="p-3.5 border-b border-border/70 flex items-center justify-between">
         <div className="flex items-center gap-2 font-bold text-foreground text-sm">
@@ -91,7 +91,7 @@ export const GeoSpatialStoryPanel: React.FC<GeoSpatialStoryPanelProps> = ({
 
                   {/* Transit Metrics from previous milestone */}
                   {card.distance_from_previous_km !== null && card.distance_from_previous_km !== undefined && (
-                    <div className="p-2 rounded-lg bg-black/30 border border-border/40 grid grid-cols-3 gap-1 text-[10px] font-mono">
+                    <div className="p-2 rounded-lg bg-secondary/60 border border-border/50 grid grid-cols-3 gap-1 text-[10px] font-mono">
                       <div>
                         <span className="text-muted-foreground block text-[9px]">Transit</span>
                         <span className="text-foreground font-semibold">{card.distance_from_previous_km} km</span>
@@ -104,7 +104,7 @@ export const GeoSpatialStoryPanel: React.FC<GeoSpatialStoryPanelProps> = ({
                       </div>
                       <div>
                         <span className="text-muted-foreground block text-[9px]">Implied Velocity</span>
-                        <span className={`font-semibold ${card.implied_speed_kmh && card.implied_speed_kmh > 120 ? 'text-rose-400' : 'text-primary'}`}>
+                        <span className={`font-semibold ${card.implied_speed_kmh && card.implied_speed_kmh > 120 ? 'text-rose-500 dark:text-rose-400' : 'text-primary'}`}>
                           {card.implied_speed_kmh ? `${card.implied_speed_kmh} km/h` : '-'}
                         </span>
                       </div>
@@ -113,8 +113,8 @@ export const GeoSpatialStoryPanel: React.FC<GeoSpatialStoryPanelProps> = ({
 
                   {/* Anomalies alert */}
                   {hasAnomaly && (
-                    <div className="flex items-center gap-1.5 text-[10px] text-rose-300 font-mono bg-rose-500/10 p-1.5 rounded border border-rose-500/20">
-                      <AlertTriangle className="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />
+                    <div className="flex items-center gap-1.5 text-[10px] text-rose-500 dark:text-rose-300 font-mono bg-rose-500/10 p-1.5 rounded border border-rose-500/20">
+                      <AlertTriangle className="w-3.5 h-3.5 text-rose-500 dark:text-rose-400 flex-shrink-0" />
                       <span>{card.anomalies.join(', ')}</span>
                     </div>
                   )}
@@ -134,7 +134,7 @@ export const GeoSpatialStoryPanel: React.FC<GeoSpatialStoryPanelProps> = ({
       </div>
 
       {/* Footer */}
-      <div className="p-2.5 bg-black/40 border-t border-border/60 text-[10px] text-muted-foreground flex items-center gap-1.5">
+      <div className="p-2.5 bg-secondary/50 border-t border-border/60 text-[10px] text-muted-foreground flex items-center gap-1.5">
         <ShieldCheck className="w-3.5 h-3.5 text-primary flex-shrink-0" />
         <span>Grounded in cryptographic evidence records with zero generative hallucination.</span>
       </div>

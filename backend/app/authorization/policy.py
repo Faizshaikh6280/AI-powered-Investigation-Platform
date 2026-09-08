@@ -75,7 +75,9 @@ def authorize(
     user_perms = get_user_permissions(db, user)
     role_name = user.role.name if user.role else ""
 
-    if action not in user_perms:
+    if role_name == Roles.SYSTEM_ADMIN:
+        pass  # System Administrator has universal access across all modules
+    elif action not in user_perms:
         return PolicyDecision(
             allowed=False,
             reason=f"Role '{role_name}' does not possess required permission '{action}'"

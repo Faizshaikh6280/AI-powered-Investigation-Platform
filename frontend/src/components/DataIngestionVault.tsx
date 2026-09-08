@@ -100,9 +100,9 @@ export default function DataIngestionVault({
   }
 
   return (
-    <div className="flex flex-col h-full bg-background p-6 md:p-8 max-w-7xl mx-auto w-full overflow-y-auto">
+    <div className="flex flex-col h-full bg-background p-3 sm:p-6 md:p-8 max-w-7xl mx-auto w-full overflow-y-auto">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8 border-b border-border pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 sm:mb-8 border-b border-border pb-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="text-xs font-mono font-bold text-primary bg-primary/10 px-2 py-0.5 rounded border border-primary/20">
@@ -110,16 +110,16 @@ export default function DataIngestionVault({
             </span>
             <span className="text-xs text-muted-foreground">• Active Dossier</span>
           </div>
-          <h2 className="text-2xl font-bold text-foreground">Evidence Intake & Automatic Classification</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
+          <h2 className="text-xl sm:text-2xl font-bold text-foreground">Evidence Intake & Automatic Classification</h2>
+          <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
             Upload unlabelled raw evidence or acquire physical NFC evidence. The backend computes SHA-256 hashes, encrypts with AES-256-GCM, and auto-detects domain schemas.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <button
             onClick={() => setIsNfcModalOpen(true)}
-            className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 text-white text-sm font-medium rounded-lg hover:from-cyan-500 hover:to-blue-500 transition-all flex items-center gap-2 shadow-sm"
+            className="px-3.5 sm:px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 text-white text-xs sm:text-sm font-medium rounded-lg hover:from-cyan-500 hover:to-blue-500 transition-all flex items-center gap-2 shadow-sm"
           >
             <Radio className="w-4 h-4 animate-pulse text-cyan-200" />
             Scan NFC Evidence
@@ -127,7 +127,7 @@ export default function DataIngestionVault({
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={isUploading}
-            className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
+            className="px-3.5 sm:px-4 py-2 bg-primary text-primary-foreground text-xs sm:text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
           >
             {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
             Upload Evidence Files
@@ -135,7 +135,7 @@ export default function DataIngestionVault({
           {evidenceList.length > 0 && onNavigateToPipeline && (
             <button
               onClick={handleGoToPipeline}
-              className="px-4 py-2 bg-secondary text-foreground border border-border text-sm font-medium rounded-lg hover:bg-secondary/80 transition-colors flex items-center gap-2 shadow-sm"
+              className="px-3.5 sm:px-4 py-2 bg-secondary text-foreground border border-border text-xs sm:text-sm font-medium rounded-lg hover:bg-secondary/80 transition-colors flex items-center gap-2 shadow-sm"
             >
               <Play className="w-4 h-4 text-emerald-500" />
               Go to Processing Pipeline
@@ -182,7 +182,7 @@ export default function DataIngestionVault({
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
             {evidenceList.map((item) => {
               const Icon = getSourceIcon(item.source_type);
               const colorClass = getSourceColor(item.source_type);
@@ -190,16 +190,16 @@ export default function DataIngestionVault({
               return (
                 <div 
                   key={item.evidence_id} 
-                  className="bg-card border border-border p-6 rounded-xl flex flex-col justify-between shadow-sm hover:border-primary/50 transition-colors group"
+                  className="bg-card border border-border p-4 sm:p-6 rounded-xl flex flex-col justify-between shadow-sm hover:border-primary/50 transition-colors group"
                 >
                   <div>
                     <div className="flex justify-between items-start mb-4">
-                      <div className="flex items-center gap-3">
-                        <div className={cn("p-2.5 rounded-lg border", colorClass)}>
-                          <Icon className="w-5 h-5" />
+                      <div className="flex items-center gap-2.5 sm:gap-3">
+                        <div className={cn("p-2 sm:p-2.5 rounded-lg border", colorClass)}>
+                          <Icon className="w-4 h-4 sm:w-5 sm:h-5" />
                         </div>
                         <div>
-                          <h4 className="font-bold text-foreground text-sm truncate max-w-[180px]" title={item.filename}>
+                          <h4 className="font-bold text-foreground text-xs sm:text-sm truncate max-w-[130px] xs:max-w-[180px]" title={item.filename}>
                             {item.filename}
                           </h4>
                           <span className="text-[11px] font-mono text-muted-foreground">

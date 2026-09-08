@@ -51,7 +51,7 @@ export const GeoEventDetailDrawer: React.FC<GeoEventDetailDrawerProps> = ({
   const coordsString = `${event.latitude.toFixed(5)}, ${event.longitude.toFixed(5)}`;
 
   return (
-    <div className="fixed top-14 right-0 bottom-0 w-96 bg-[#0b101b]/98 border-l border-border/80 shadow-2xl z-40 flex flex-col backdrop-blur-xl animate-in slide-in-from-right duration-200">
+    <div className="fixed top-14 right-0 bottom-0 w-96 bg-card/98 border-l border-border/80 shadow-2xl z-40 flex flex-col backdrop-blur-xl animate-in slide-in-from-right duration-200">
       {/* Drawer Header */}
       <div className="p-4 border-b border-border/70 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -196,7 +196,7 @@ export const GeoEventDetailDrawer: React.FC<GeoEventDetailDrawerProps> = ({
                     <span>Copy</span>
                   </button>
                 </div>
-                <p className="font-mono text-[9px] text-emerald-400/90 break-all bg-black/40 p-1 rounded">
+                <p className="font-mono text-[9px] text-emerald-600 dark:text-emerald-400 break-all bg-secondary/70 p-1.5 rounded border border-border/50">
                   {event.evidence_sha256}
                 </p>
               </div>
@@ -217,19 +217,19 @@ export const GeoEventDetailDrawer: React.FC<GeoEventDetailDrawerProps> = ({
             </div>
           ) : contextData ? (
             <div className="space-y-2">
-              <p className="text-[11px] text-muted-foreground italic bg-black/20 p-2 rounded border border-border/40">
+              <p className="text-[11px] text-muted-foreground italic bg-secondary/50 p-2 rounded border border-border/40">
                 {contextData.context_summary}
               </p>
 
               {/* Prior Events */}
               {contextData.prior_events?.length > 0 && (
                 <div className="space-y-1">
-                  <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider block">
+                  <span className="text-[10px] font-bold text-cyan-500 dark:text-cyan-400 uppercase tracking-wider block">
                     Pre-Departure Activity ({contextData.prior_events.length})
                   </span>
                   <div className="space-y-1 max-h-28 overflow-y-auto pr-1">
                     {contextData.prior_events.slice(-3).map((pe: any, i: number) => (
-                      <div key={i} className="p-1.5 rounded bg-black/30 border border-border/30 text-[10px]">
+                      <div key={i} className="p-1.5 rounded bg-secondary/60 border border-border/40 text-[10px]">
                         <div className="flex justify-between font-mono text-muted-foreground">
                           <span>{pe.event_type}</span>
                           <span>{pe.timestamp?.substring(11, 19)}</span>
@@ -244,12 +244,12 @@ export const GeoEventDetailDrawer: React.FC<GeoEventDetailDrawerProps> = ({
               {/* Posterior Events */}
               {contextData.posterior_events?.length > 0 && (
                 <div className="space-y-1 pt-1 border-t border-border/40">
-                  <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block">
+                  <span className="text-[10px] font-bold text-emerald-500 dark:text-emerald-400 uppercase tracking-wider block">
                     Post-Arrival Activity ({contextData.posterior_events.length})
                   </span>
                   <div className="space-y-1 max-h-28 overflow-y-auto pr-1">
                     {contextData.posterior_events.slice(0, 3).map((pe: any, i: number) => (
-                      <div key={i} className="p-1.5 rounded bg-black/30 border border-border/30 text-[10px]">
+                      <div key={i} className="p-1.5 rounded bg-secondary/60 border border-border/40 text-[10px]">
                         <div className="flex justify-between font-mono text-muted-foreground">
                           <span>{pe.event_type}</span>
                           <span>{pe.timestamp?.substring(11, 19)}</span>
